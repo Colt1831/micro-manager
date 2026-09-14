@@ -128,5 +128,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy via webhook
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        # Skip cleanly when the hook secret isn't configured — otherwise
+        # `curl -X POST ""` fails every main push with "Malformed URL".
         run: |
-          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK not set — skipping Render deploy."
+            exit 0
+          fi
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
