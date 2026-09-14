@@ -70,6 +70,9 @@ export const users = pgTable(
     designation: varchar('designation', { length: 200 }),
     employeeId: varchar('employee_id', { length: 50 }),
     employmentStatus: varchar('employment_status', { length: 50 }).default('active'),
+    // Organizational rank (authority + scope). One per user. See
+    // packages/shared/src/constants/rank.ts for the level map and rules.
+    rank: varchar('rank', { length: 50 }).default('executive'),
     departmentId: uuid('department_id').references((): AnyPgColumn => departments.id),
     teamId: uuid('team_id').references((): AnyPgColumn => teams.id),
     reportingManagerId: text('reporting_manager_id').references((): AnyPgColumn => users.id),

@@ -1,9 +1,10 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { db, schema, handleApiError } from '@/lib/api/db';
-import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-auth';
+import { withAuth, enforceOrgScope, requirePermission, getUserRank } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull } from 'drizzle-orm';
+import { canGrantRank, isRank } from '@workmanagement/shared';
 
 export const runtime = 'nodejs';
 
@@ -78,6 +79,7 @@ export const PATCH = withAuth(
         teamId,
         location,
         timezone,
+        rank,
       } = body;
 
       // Fetch existing for org scope check
@@ -106,6 +108,38 @@ export const PATCH = withAuth(
       if (teamId !== undefined) updateData.teamId = teamId;
       if (location !== undefined) updateData.location = location;
       if (timezone !== undefined) updateData.timezone = timezone;
+
+      // ── Rank change: downward-only, gated by the actor's own rank ──────
+      // Changing a person's rank is authority-granting, so it is NOT covered
+      // by plain user:edit. The actor must out-rank BOTH the new rank and the
+      // target's current rank (can't demote someone above you either).
+      if (rank !== undefined && rank !== existing.rank) {
+        if (!isRank(rank)) {
+          return NextResponse.json(
+            { error: { code: 'VALIDATION_ERROR', message: 'Invalid rank' } },
+            { status: 400 },
+          );
+        }
+        const actorRank = await getUserRank(user.id);
+        if (!canGrantRank(actorRank, rank) || !canGrantRank(actorRank, existing.rank)) {
+          return NextResponse.json(
+            {
+              error: {
+                code: 'FORBIDDEN',
+                message: 'You cannot set a rank at or above your own authority level',
+              },
+            },
+            { status: 403 },
+          );
+        }
+        if (id === user.id) {
+          return NextResponse.json(
+            { error: { code: 'FORBIDDEN', message: 'You cannot change your own rank' } },
+            { status: 403 },
+          );
+        }
+        updateData.rank = rank;
+      }
 
       const [updated] = await db()
         .update(schema.users)

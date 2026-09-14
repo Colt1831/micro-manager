@@ -3,9 +3,31 @@ import { NextResponse } from 'next/server';
 import { db, schema, handleApiError } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, desc } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
+
+/**
+ * The caller's highest capability-role priority — their grant ceiling.
+ * A user may only assign a role strictly below this. Missing/roleless → -1
+ * (can assign nothing), which is the safe default.
+ */
+async function actorMaxRolePriority(userId: string): Promise<number> {
+  const [top] = await db()
+    .select({ priority: schema.roles.priority })
+    .from(schema.userRoles)
+    .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+    .where(
+      and(
+        eq(schema.userRoles.userId, userId),
+        eq(schema.roles.isActive, true),
+        isNull(schema.roles.deletedAt),
+      ),
+    )
+    .orderBy(desc(schema.roles.priority))
+    .limit(1);
+  return top?.priority ?? -1;
+}
 
 function getUserIdFromPath(request: NextRequest): string {
   const segments = request.nextUrl.pathname.split('/');
@@ -88,6 +110,44 @@ export const POST = withAuth(
       if (role.organizationId !== orgId) {
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Cross-organization role assignment denied' } },
+          { status: 403 },
+        );
+      }
+
+      // Target user must exist and be in the SAME org (audit gap: previously
+      // only the role's org was checked, letting a role be pinned onto a user
+      // in another org).
+      const [targetUser] = await db()
+        .select({ id: schema.users.id, organizationId: schema.users.organizationId })
+        .from(schema.users)
+        .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)))
+        .limit(1);
+
+      if (!targetUser) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'User not found' } },
+          { status: 404 },
+        );
+      }
+      if (targetUser.organizationId !== orgId) {
+        return NextResponse.json(
+          { error: { code: 'FORBIDDEN', message: 'Cross-organization role assignment denied' } },
+          { status: 403 },
+        );
+      }
+
+      // Grant ceiling: you may only assign a role strictly BELOW your own
+      // highest role priority — no self-escalation, no minting peers/admins.
+      // (Closes the seeded-manager-assigns-admin escalation.)
+      const ceiling = await actorMaxRolePriority(user.id);
+      if ((role.priority ?? 0) >= ceiling) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'FORBIDDEN',
+              message: 'You cannot assign a role at or above your own authority level',
+            },
+          },
           { status: 403 },
         );
       }

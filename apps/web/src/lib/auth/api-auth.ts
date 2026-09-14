@@ -192,6 +192,25 @@ export async function getUserStatus(userId: string): Promise<UserStatus> {
 }
 
 /**
+ * Fetch a user's organizational rank (authority level). Returns null if the
+ * user is missing. Used by the sensitive role/rank assignment routes to
+ * enforce the downward-only hierarchy.
+ */
+export async function getUserRank(userId: string): Promise<string | null> {
+  try {
+    const db = getDb();
+    const [row] = await db
+      .select({ rank: schema.users.rank })
+      .from(schema.users)
+      .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)))
+      .limit(1);
+    return row?.rank ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Enforce that a record's organization_id matches the user's org.
  */
 export function enforceOrgScope(recordOrgId: string | null, userOrgId: string | null): void {

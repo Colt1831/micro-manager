@@ -12,6 +12,11 @@ const eslintConfig = tseslint.config(
     'out/**',
     'build/**',
     'next-env.d.ts',
+    // Generated test artifacts — huge bundles that overflow the eslint
+    // formatter (RangeError: Invalid string length) and are never source.
+    'playwright-report/**',
+    'test-results/**',
+    'coverage/**',
   ]),
 
   // Shared custom rules with explicit TypeScript plugin registration

@@ -1,5 +1,5 @@
 import { getDb, schema } from '@workmanagement/database';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, isNull, or, gt } from 'drizzle-orm';
 import { AsyncLocalStorage } from 'async_hooks';
 
 export interface Permission {
@@ -43,13 +43,23 @@ export async function getUserPermissions(userId: string): Promise<Permission[]> 
   try {
     const db = getDb();
 
-    // Get user's roles
+    // Get user's roles — only ACTIVE, non-deleted, non-expired assignments.
+    // A deleted/disabled role, or an expired user_role, grants nothing.
+    const now = new Date();
     const userRoles = await db
       .select({
         roleId: schema.userRoles.roleId,
       })
       .from(schema.userRoles)
-      .where(eq(schema.userRoles.userId, userId));
+      .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+      .where(
+        and(
+          eq(schema.userRoles.userId, userId),
+          eq(schema.roles.isActive, true),
+          isNull(schema.roles.deletedAt),
+          or(isNull(schema.userRoles.expiresAt), gt(schema.userRoles.expiresAt, now)),
+        ),
+      );
 
     if (userRoles.length === 0) {
       // Cache empty result to avoid re-querying
@@ -59,25 +69,35 @@ export async function getUserPermissions(userId: string): Promise<Permission[]> 
 
     const roleIds = userRoles.map((r) => r.roleId);
 
-    // Get permission IDs for those roles
+    // Get every role_permission row for those roles, INCLUDING allow=false.
+    // We must see denies to apply deny-override below.
     const rolePerms = await db
       .select({
         permissionId: schema.rolePermissions.permissionId,
+        allow: schema.rolePermissions.allow,
       })
       .from(schema.rolePermissions)
-      .where(
-        and(
-          inArray(schema.rolePermissions.roleId, roleIds),
-          eq(schema.rolePermissions.allow, true),
-        ),
-      );
+      .where(inArray(schema.rolePermissions.roleId, roleIds));
 
     if (rolePerms.length === 0) {
       store?.set(userId, []);
       return [];
     }
 
-    const permIds = [...new Set(rolePerms.map((rp) => rp.permissionId))];
+    // Deny-override: a permission is granted only if at least one role allows it
+    // AND no role explicitly denies it (allow=false wins across roles).
+    const denied = new Set<string>();
+    const allowed = new Set<string>();
+    for (const rp of rolePerms) {
+      if (rp.allow === false) denied.add(rp.permissionId);
+      else allowed.add(rp.permissionId);
+    }
+    const grantedIds = [...allowed].filter((id) => !denied.has(id));
+
+    if (grantedIds.length === 0) {
+      store?.set(userId, []);
+      return [];
+    }
 
     // Get permission details
     const permissions = await db
@@ -88,7 +108,7 @@ export async function getUserPermissions(userId: string): Promise<Permission[]> 
         module: schema.permissions.module,
       })
       .from(schema.permissions)
-      .where(inArray(schema.permissions.id, permIds));
+      .where(inArray(schema.permissions.id, grantedIds));
 
     // Populate the request-scoped store before returning
     store?.set(userId, permissions);

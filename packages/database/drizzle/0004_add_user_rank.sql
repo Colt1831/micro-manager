@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "rank" varchar(50) DEFAULT 'executive';

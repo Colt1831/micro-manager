@@ -29,6 +29,13 @@
       "when": 1786480352549,
       "tag": "0003_add_running_timer_unique_index",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789058902031,
+      "tag": "0004_add_user_rank",
+      "breakpoints": true
     }
   ]
 }

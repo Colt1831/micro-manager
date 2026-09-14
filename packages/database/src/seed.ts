@@ -63,6 +63,9 @@ async function seed() {
     { code: 'project:archive', name: 'Archive Projects', module: 'project' },
     // Task permissions
     { code: 'task:view', name: 'View Tasks', module: 'task' },
+    // Org-wide task visibility (GM+). The tasks route checks this to decide
+    // scope; without it seeded, no one could ever see all tasks — a real bug.
+    { code: 'task:view_all', name: 'View All Tasks', module: 'task' },
     { code: 'task:create', name: 'Create Tasks', module: 'task' },
     { code: 'task:edit', name: 'Edit Tasks', module: 'task' },
     { code: 'task:delete', name: 'Delete Tasks', module: 'task' },
@@ -169,6 +172,25 @@ async function seed() {
           priority: data.priority,
         })
         .returning();
+    } else if (
+      role.priority !== data.priority ||
+      role.name !== data.name ||
+      role.description !== data.description
+    ) {
+      // Converge system-role metadata on re-seed. priority is security-relevant:
+      // the role-assignment grant ceiling ranks roles by priority, so a stale
+      // value (e.g. legacy manager=80) is a privilege-escalation risk. Idempotent
+      // — the UPDATE only runs when something actually differs.
+      [role] = await db
+        .update(schema.roles)
+        .set({
+          name: data.name,
+          description: data.description,
+          priority: data.priority,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.roles.id, role.id))
+        .returning();
     }
 
     // Assign permissions that aren't already assigned
@@ -201,11 +223,88 @@ async function seed() {
   });
   console.log('  ✓ Role: Administrator');
 
+  // ─── System RANK roles ───────────────────────────────────
+  // Capability bundles that back the org rank hierarchy. priority == rank level
+  // (packages/shared/src/constants/rank.ts) so the grant ceiling in
+  // /api/users/[id]/roles enforces downward-only assignment. task:view_all is
+  // granted to general_manager and up only.
+
+  await ensureRole({
+    slug: 'super_admin',
+    name: 'Super Admin',
+    description: 'Platform super administrator — full access, all departments',
+    priority: 100,
+    permissionCodes: allCodes,
+  });
+  console.log('  ✓ Role: Super Admin');
+
+  await ensureRole({
+    slug: 'owner',
+    name: 'Owner',
+    description: 'Organization owner — full organizational access',
+    priority: 60,
+    permissionCodes: allCodes,
+  });
+  console.log('  ✓ Role: Owner');
+
+  await ensureRole({
+    slug: 'general_manager',
+    name: 'General Manager',
+    description: 'Cross-department management; org-wide task visibility',
+    priority: 50,
+    permissionCodes: [
+      'user:view',
+      'user:create',
+      'user:edit',
+      'role:view',
+      'role:assign',
+      'department:view',
+      'department:create',
+      'department:edit',
+      'team:view',
+      'team:create',
+      'team:edit',
+      'team:manage',
+      'project:view',
+      'project:create',
+      'project:edit',
+      'project:archive',
+      'task:view',
+      'task:view_all',
+      'task:create',
+      'task:edit',
+      'task:assign',
+      'task:comment',
+      'task:change_status',
+      'task:complete',
+      'task:review',
+      'task:close',
+      'task:reopen',
+      'milestone:view',
+      'milestone:create',
+      'milestone:edit',
+      'report:view',
+      'report:generate',
+      'report:export',
+      'report:create',
+      'time:manage',
+      'integration:view',
+      'setting:view',
+      'settings:view',
+      'org:view',
+      'audit:view',
+    ],
+  });
+  console.log('  ✓ Role: General Manager');
+
   await ensureRole({
     slug: 'manager',
     name: 'Manager',
     description: 'Department/team management access',
-    priority: 80,
+    // Rank level for manager (see packages/shared/src/constants/rank.ts). Was 80;
+    // lowered so a manager cannot assign general_manager(50)/owner(60) via the
+    // grant ceiling. No task:view_all — org-wide task visibility is GM+ only.
+    priority: 40,
     permissionCodes: [
       'user:view',
       'role:view',
@@ -245,7 +344,8 @@ async function seed() {
     slug: 'team_lead',
     name: 'Team Lead',
     description: 'Team-level task management access',
-    priority: 60,
+    // Rank level for team_lead (see rank.ts). Was 60.
+    priority: 30,
     permissionCodes: [
       'user:view',
       'team:view',
@@ -294,6 +394,49 @@ async function seed() {
   });
   console.log('  ✓ Role: Viewer');
 
+  await ensureRole({
+    slug: 'senior_executive',
+    name: 'Senior Executive',
+    description: 'Senior individual contributor — task execution + review',
+    priority: 20,
+    permissionCodes: [
+      'user:view',
+      'team:view',
+      'project:view',
+      'task:view',
+      'task:create',
+      'task:edit',
+      'task:comment',
+      'task:change_status',
+      'task:complete',
+      'task:review',
+      'report:view',
+      'milestone:view',
+    ],
+  });
+  console.log('  ✓ Role: Senior Executive');
+
+  await ensureRole({
+    slug: 'executive',
+    name: 'Executive',
+    description: 'Individual contributor — own task execution',
+    priority: 10,
+    permissionCodes: [
+      'user:view',
+      'team:view',
+      'project:view',
+      'task:view',
+      'task:create',
+      'task:edit',
+      'task:comment',
+      'task:change_status',
+      'task:complete',
+      'report:view',
+      'milestone:view',
+    ],
+  });
+  console.log('  ✓ Role: Executive');
+
   // ─── Department & Team ───────────────────────────────────
   const [existingDept] = await db
     .select()
@@ -339,7 +482,9 @@ async function seed() {
   }
 
   console.log('\n✅ Seed complete!');
-  console.log('   Roles: admin, manager, team_lead, member, viewer');
+  console.log(
+    '   Roles: super_admin, admin, owner, general_manager, manager, team_lead, senior_executive, member, viewer, executive',
+  );
   console.log(`   ${allPermRecords.length} permissions`);
   process.exit(0);
 }

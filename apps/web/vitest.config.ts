@@ -15,6 +15,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Mirror the tsconfig paths so tests that import route modules can
+      // resolve the workspace packages (not symlinked under node_modules).
+      '@workmanagement/shared': path.resolve(__dirname, '../../packages/shared/src'),
     },
   },
 });
