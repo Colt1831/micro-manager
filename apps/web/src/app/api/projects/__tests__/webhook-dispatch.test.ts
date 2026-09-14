@@ -61,11 +61,19 @@ vi.mock('@/lib/auth/api-auth', () => ({
     (
       handler: (
         req: Request,
-        ctx: { user: { id: string }; orgId: string },
+        ctx: {
+          user: { id: string };
+          orgId: string;
+          scope: { rank: string | null; level: number; departmentId: string | null; seeAllDepartments: boolean };
+        },
       ) => Promise<Response>,
     ) =>
     (req: Request) =>
-      handler(req, { user: { id: 'user-1' }, orgId: 'org-1' }),
+      handler(req, {
+        user: { id: 'user-1' },
+        orgId: 'org-1',
+        scope: { rank: 'general_manager', level: 50, departmentId: null, seeAllDepartments: true },
+      }),
   requirePermission: vi.fn().mockResolvedValue(undefined),
   checkPermission: vi.fn().mockResolvedValue(true),
   enforceOrgScope: vi.fn(),
@@ -120,6 +128,9 @@ vi.mock('@/lib/api/db', () => {
         status: 500,
       };
     }),
+    // Phase 2 dept-wall helpers — not under test here; allow / passthrough.
+    canAccessDept: vi.fn(() => true),
+    applyDeptScope: vi.fn((conditions: unknown[]) => conditions),
   };
 });
 

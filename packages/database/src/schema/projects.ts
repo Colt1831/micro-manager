@@ -59,6 +59,7 @@ export const projects = pgTable(
     ownerIdx: index('idx_projects_owner').on(table.ownerId),
     statusIdx: index('idx_projects_status').on(table.status),
     codeIdx: index('idx_projects_code').on(table.code),
+    departmentIdx: index('idx_projects_department').on(table.departmentId),
   }),
 );
 

@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope, resolveTaskDepartment } from '@/lib/api/db';
 import { withAuth, requirePermission, checkPermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, desc, and, isNull, like, or, sql, inArray } from 'drizzle-orm';
@@ -21,7 +21,7 @@ export const runtime = 'nodejs';
 //   - tasks where they are mentioned (mentionedUserIds contains user.id)
 // - Users with 'task:view_all' permission see all tasks in the org
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'task:view');
 
@@ -40,6 +40,11 @@ export const GET = withAuth(
       const fieldsOnly = searchParams.get('fields') === 'id';
 
       const conditions = [eq(schema.tasks.organizationId, orgId!)];
+
+      // Department wall: GM+/super_admin see all departments; everyone below is
+      // scoped to their own department. Orthogonal to task:view_all (that governs
+      // org-wide row visibility WITHIN the department the wall allows).
+      applyDeptScope(conditions, scope, schema.tasks.departmentId);
 
       if (showDeleted) {
         // Show only soft-deleted tasks
@@ -242,6 +247,10 @@ export const POST = withAuth(
       // ── Detect @mentions in description ───────────────────────
       const mentionedUserIds = await extractAndResolveMentions(orgId!, description, user.id);
 
+      // Resolve the department for the isolation wall: assignee -> creator
+      // (no team on create). Denormalized so cross-dept reads filter cheaply.
+      const departmentId = await resolveTaskDepartment({ assignedTo, createdBy: user.id });
+
       const [task] = await db()
         .insert(schema.tasks)
         .values({
@@ -252,6 +261,7 @@ export const POST = withAuth(
           priority,
           assignedTo,
           assignedBy: assignedTo ? user.id : null,
+          departmentId,
           dueDate: dueDate ? new Date(dueDate) : null,
           organizationId: orgId!,
           createdBy: user.id,

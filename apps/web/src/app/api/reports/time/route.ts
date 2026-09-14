@@ -1,15 +1,15 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth } from '@/lib/auth/api-auth';
-import { eq, and, isNull, isNotNull, sql, gte } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, sql, gte, type SQL } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
 
 // ─── GET /api/reports/time — Time tracking report data ──────────
 
 export const GET = withAuth(
-  async (request: NextRequest, { user: _user, orgId }) => {
+  async (request: NextRequest, { user: _user, orgId, scope }) => {
     try {
       const { searchParams } = request.nextUrl;
       const period = searchParams.get('period') ?? 'week'; // week | month | quarter
@@ -29,6 +29,21 @@ export const GET = withAuth(
           periodStart = new Date(startOfDay.getTime() - 7 * 86_400_000);
       }
 
+      // Shared filter for every aggregation. Department wall: a walled manager
+      // only sees their department's time (scoped via the task's department);
+      // GM+/super_admin see the whole org. Fresh array per call — applyDeptScope
+      // mutates it, so it must not be shared by reference across queries.
+      const baseConditions = (): SQL[] => {
+        const c: SQL[] = [
+          eq(schema.tasks.organizationId, orgId!),
+          gte(schema.timeEntries.startTime, periodStart),
+          isNull(schema.tasks.deletedAt),
+          isNotNull(schema.timeEntries.durationMinutes),
+        ];
+        applyDeptScope(c, scope, schema.tasks.departmentId);
+        return c;
+      };
+
       // ── Hours by day ──────────────────────────────────
       const dailyHours = await db()
         .select({
@@ -38,14 +53,7 @@ export const GET = withAuth(
         })
         .from(schema.timeEntries)
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
-        .where(
-          and(
-            eq(schema.tasks.organizationId, orgId!),
-            gte(schema.timeEntries.startTime, periodStart),
-            isNull(schema.tasks.deletedAt),
-            isNotNull(schema.timeEntries.durationMinutes),
-          ),
-        )
+        .where(and(...baseConditions()))
         .groupBy(sql`date(${schema.timeEntries.startTime})`)
         .orderBy(sql`date(${schema.timeEntries.startTime})`);
 
@@ -60,14 +68,7 @@ export const GET = withAuth(
         .from(schema.timeEntries)
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
         .leftJoin(schema.users, eq(schema.timeEntries.userId, schema.users.id))
-        .where(
-          and(
-            eq(schema.tasks.organizationId, orgId!),
-            gte(schema.timeEntries.startTime, periodStart),
-            isNull(schema.tasks.deletedAt),
-            isNotNull(schema.timeEntries.durationMinutes),
-          ),
-        )
+        .where(and(...baseConditions()))
         .groupBy(schema.timeEntries.userId, schema.users.name)
         .orderBy(sql`coalesce(sum(${schema.timeEntries.durationMinutes}), 0) desc`)
         .limit(20);
@@ -83,15 +84,7 @@ export const GET = withAuth(
         .from(schema.timeEntries)
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
         .leftJoin(schema.projects, eq(schema.tasks.projectId, schema.projects.id))
-        .where(
-          and(
-            eq(schema.tasks.organizationId, orgId!),
-            gte(schema.timeEntries.startTime, periodStart),
-            isNull(schema.tasks.deletedAt),
-            isNotNull(schema.timeEntries.durationMinutes),
-            isNotNull(schema.tasks.projectId),
-          ),
-        )
+        .where(and(...baseConditions(), isNotNull(schema.tasks.projectId)))
         .groupBy(schema.projects.id, schema.projects.name)
         .orderBy(sql`coalesce(sum(${schema.timeEntries.durationMinutes}), 0) desc`)
         .limit(20);
@@ -107,14 +100,7 @@ export const GET = withAuth(
         })
         .from(schema.timeEntries)
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
-        .where(
-          and(
-            eq(schema.tasks.organizationId, orgId!),
-            gte(schema.timeEntries.startTime, periodStart),
-            isNull(schema.tasks.deletedAt),
-            isNotNull(schema.timeEntries.durationMinutes),
-          ),
-        )
+        .where(and(...baseConditions()))
         .groupBy(schema.tasks.id, schema.tasks.title, schema.tasks.taskIdDisplay)
         .orderBy(sql`coalesce(sum(${schema.timeEntries.durationMinutes}), 0) desc`)
         .limit(20);
@@ -128,14 +114,7 @@ export const GET = withAuth(
         })
         .from(schema.timeEntries)
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
-        .where(
-          and(
-            eq(schema.tasks.organizationId, orgId!),
-            gte(schema.timeEntries.startTime, periodStart),
-            isNull(schema.tasks.deletedAt),
-            isNotNull(schema.timeEntries.durationMinutes),
-          ),
-        );
+        .where(and(...baseConditions()));
 
       return NextResponse.json({
         period,

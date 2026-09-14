@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept, resolveTaskDepartment } from '@/lib/api/db';
 import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications';
@@ -25,7 +25,7 @@ function getIdFromPath(request: NextRequest): string {
 
 // GET /api/tasks/[id] - Get single task (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'task:view');
@@ -45,6 +45,15 @@ export const GET = withAuth(
 
       enforceOrgScope(task.organizationId, orgId);
 
+      // Department wall: a walled user must not read a task outside their dept.
+      // 404 (not 403) so a cross-dept id is indistinguishable from a missing one.
+      if (!canAccessDept(scope, task.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Task not found' } },
+          { status: 404 },
+        );
+      }
+
       return NextResponse.json({ task });
     } catch (error) {
       const { error: err, status } = handleApiError(error, 'Failed to fetch task');
@@ -56,7 +65,7 @@ export const GET = withAuth(
 
 // PATCH /api/tasks/[id] - Update task (rate limited: 60 req/min per user)
 export const PATCH = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'task:edit');
@@ -96,6 +105,14 @@ export const PATCH = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall: a walled user cannot mutate a task outside their dept.
+      if (!canAccessDept(scope, existing.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Task not found' } },
+          { status: 404 },
+        );
+      }
 
       // ── Readonly enforcement: closed/archived tasks cannot be edited ──
       if (READONLY_STATUSES.has(existing.status)) {
@@ -234,6 +251,13 @@ export const PATCH = withAuth(
       // Track assigned_by if assignee changed
       if (assignedTo !== undefined && assignedTo !== existing.assignedTo) {
         updateData.assignedBy = user.id;
+        // Keep the denormalized department in sync so the wall follows the task
+        // to its new assignee: new assignee's dept -> existing team -> creator.
+        updateData.departmentId = await resolveTaskDepartment({
+          assignedTo,
+          teamId: existing.teamId,
+          createdBy: existing.createdBy,
+        });
       }
 
       // Track completion time
@@ -478,7 +502,7 @@ export const PATCH = withAuth(
 
 // DELETE /api/tasks/[id] - Soft delete task (rate limited: 30 req/min per user)
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'task:delete');
@@ -497,6 +521,14 @@ export const DELETE = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall: a walled user cannot delete a task outside their dept.
+      if (!canAccessDept(scope, existing.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Task not found' } },
+          { status: 404 },
+        );
+      }
 
       await db()
         .update(schema.tasks)

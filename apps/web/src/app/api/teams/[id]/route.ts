@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull, sql } from 'drizzle-orm';
@@ -14,7 +14,7 @@ function getIdFromPath(request: NextRequest): string {
 
 // GET /api/teams/[id] - Get team with members, department info, and task stats (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
 
@@ -56,6 +56,14 @@ export const GET = withAuth(
       }
 
       enforceOrgScope(team.organizationId ?? null, orgId);
+
+      // Department wall: a walled user must not read a team outside their dept.
+      if (!canAccessDept(scope, team.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Team not found' } },
+          { status: 404 },
+        );
+      }
 
       // Get members
       const members = await db()
@@ -125,7 +133,7 @@ export const GET = withAuth(
 
 // PATCH /api/teams/[id] - Update team (rate limited: 60 req/min per user)
 export const PATCH = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'team:edit');
@@ -153,6 +161,14 @@ export const PATCH = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall: a walled user cannot mutate a team outside their dept.
+      if (!canAccessDept(scope, existing.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Team not found' } },
+          { status: 404 },
+        );
+      }
 
       const oldValues: Record<string, unknown> = {};
       const newValues: Record<string, unknown> = {};
@@ -206,7 +222,7 @@ export const PATCH = withAuth(
 
 // DELETE /api/teams/[id] - Soft delete team (rate limited: 60 req/min per user)
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'team:delete');
@@ -225,6 +241,14 @@ export const DELETE = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall: a walled user cannot delete a team outside their dept.
+      if (!canAccessDept(scope, existing.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Team not found' } },
+          { status: 404 },
+        );
+      }
 
       await db()
         .update(schema.teams)

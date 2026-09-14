@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, desc, and, isNull } from 'drizzle-orm';
@@ -10,14 +10,21 @@ export const runtime = 'nodejs';
 
 // GET /api/teams - List teams and departments (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (_request: NextRequest, { user, orgId }) => {
+  async (_request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'team:view');
+
+      const teamConditions = [
+        isNull(schema.teams.deletedAt),
+        eq(schema.teams.organizationId, orgId!),
+      ];
+      // Department wall: GM+/super_admin see all teams; others only their own dept's.
+      applyDeptScope(teamConditions, scope, schema.teams.departmentId);
 
       const teams = await db()
         .select()
         .from(schema.teams)
-        .where(and(isNull(schema.teams.deletedAt), eq(schema.teams.organizationId, orgId!)))
+        .where(and(...teamConditions))
         .orderBy(desc(schema.teams.createdAt));
 
       const departments = await db()
@@ -39,7 +46,7 @@ export const GET = withAuth(
 
 // POST /api/teams - Create team (rate limited: 30 req/min per user)
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'team:create');
 
@@ -50,7 +57,12 @@ export const POST = withAuth(
         return NextResponse.json(err, { status });
       }
 
-      const { name, code, description, departmentId, leadUserId } = parsed.data;
+      const { name, code, description, departmentId: departmentIdInput, leadUserId } = parsed.data;
+      // Department wall on create: a walled user can only create teams in their
+      // OWN department; GM+/super_admin may target any (or none).
+      const departmentId = scope.seeAllDepartments
+        ? (departmentIdInput ?? null)
+        : (scope.departmentId ?? null);
 
       // Validate department belongs to same org if provided
       if (departmentId) {

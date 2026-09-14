@@ -82,6 +82,7 @@ export const tasks = pgTable(
     parentIdx: index('idx_tasks_parent').on(table.parentTaskId),
     projectStatusIdx: index('idx_tasks_project_status').on(table.projectId, table.status),
     assignedStatusIdx: index('idx_tasks_assigned_status').on(table.assignedTo, table.status),
+    departmentIdx: index('idx_tasks_department').on(table.departmentId),
   }),
 );
 

@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getDb, schema } from '@workmanagement/database';
-import { withAuth } from '@/lib/auth/api-auth';
+import { withAuth, checkPermission } from '@/lib/auth/api-auth';
 import { eq, and } from 'drizzle-orm';
-import { handleApiError } from '@/lib/api/db';
+import { handleApiError, canAccessDept } from '@/lib/api/db';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +13,7 @@ function getIdFromPath(request: NextRequest): string {
 
 // GET /api/leave-requests/[id]
 export const GET = withAuth(
-  async (request: NextRequest, { orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       const db = getDb();
@@ -34,6 +34,7 @@ export const GET = withAuth(
           attachmentUrl: schema.leaveRequests.attachmentUrl,
           createdAt: schema.leaveRequests.createdAt,
           updatedAt: schema.leaveRequests.updatedAt,
+          requesterDepartmentId: schema.users.departmentId,
           user: {
             id: schema.users.id,
             name: schema.users.name,
@@ -65,7 +66,22 @@ export const GET = withAuth(
         );
       }
 
-      return NextResponse.json({ request: leaveRequest });
+      // Visibility wall (was a bug: any authenticated user could read any
+      // request by id). Allowed: the requester themselves, OR a manager with
+      // `time:manage` whose department scope covers the requester's dept.
+      const isOwn = leaveRequest.userId === user.id;
+      if (!isOwn) {
+        const canManageLeave = await checkPermission(user.id, 'time:manage');
+        if (!canManageLeave || !canAccessDept(scope, leaveRequest.requesterDepartmentId)) {
+          return NextResponse.json(
+            { error: { code: 'NOT_FOUND', message: 'Leave request not found' } },
+            { status: 404 },
+          );
+        }
+      }
+
+      const { requesterDepartmentId: _omit, ...requestOut } = leaveRequest;
+      return NextResponse.json({ request: requestOut });
     } catch (error) {
       const { error: err, status } = handleApiError(error, 'Failed to fetch leave request');
       return NextResponse.json(err, { status });

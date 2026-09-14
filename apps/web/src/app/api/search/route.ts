@@ -4,6 +4,7 @@ import { withAuth } from '@/lib/auth/api-auth';
 import { getDb, schema } from '@workmanagement/database';
 import { eq, like, or, and, isNull, desc } from 'drizzle-orm';
 import { searchTasks, searchProjects } from '@/lib/search';
+import { applyDeptScope } from '@/lib/api/db';
 
 export const runtime = 'nodejs';
 
@@ -33,7 +34,7 @@ interface SearchResponse {
 // ─── GET /api/search?q=...&type=all ────────────────────────
 
 export const GET = withAuth(
-  async (request: NextRequest, { orgId }) => {
+  async (request: NextRequest, { orgId, scope }) => {
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('q') ?? '';
     const searchType = searchParams.get('type') ?? 'all'; // tasks | projects | users | all
@@ -53,9 +54,13 @@ export const GET = withAuth(
 
     const db = getDb();
 
-    // ── Search tasks via Meilisearch ─────────────────────
+    // ── Search tasks ─────────────────────────────────────
+    // Meilisearch is org-scoped only (no department field), so a walled user
+    // MUST use the dept-scoped DB path instead — forcing the fallback avoids
+    // leaking cross-department tasks through the search index.
     if (searchType === 'all' || searchType === 'tasks') {
       try {
+        if (!scope.seeAllDepartments) throw new Error('walled: use dept-scoped DB search');
         const filter: Record<string, string> = {};
         if (filterStatus) filter.status = filterStatus;
         if (filterPriority) filter.priority = filterPriority;
@@ -81,7 +86,7 @@ export const GET = withAuth(
           total: result.total,
         };
       } catch {
-        // Meilisearch not available - fall back to DB search
+        // Meilisearch unavailable OR walled user — DB search with dept scope.
         const searchPattern = `%${query}%`;
         const dbConditions = [
           isNull(schema.tasks.deletedAt),
@@ -90,8 +95,9 @@ export const GET = withAuth(
             like(schema.tasks.title, searchPattern),
             like(schema.tasks.taskIdDisplay, searchPattern),
             like(schema.tasks.description ?? '', searchPattern),
-          ),
+          )!,
         ];
+        applyDeptScope(dbConditions, scope, schema.tasks.departmentId);
         if (filterStatus) dbConditions.push(eq(schema.tasks.status, filterStatus));
         if (filterPriority) dbConditions.push(eq(schema.tasks.priority, filterPriority));
 
@@ -125,9 +131,10 @@ export const GET = withAuth(
       }
     }
 
-    // ── Search projects via Meilisearch (with DB fallback) ─
+    // ── Search projects (Meilisearch for GM+, dept-scoped DB otherwise) ─
     if (searchType === 'all' || searchType === 'projects') {
       try {
+        if (!scope.seeAllDepartments) throw new Error('walled: use dept-scoped DB search');
         const result = await searchProjects({
           query,
           organizationId: orgId!,
@@ -149,8 +156,18 @@ export const GET = withAuth(
           total: result.total,
         };
       } catch {
-        // Meilisearch not available - fall back to DB search
+        // Meilisearch unavailable OR walled user — DB search with dept scope.
         const searchPattern = `%${query}%`;
+        const projConditions = [
+          isNull(schema.projects.deletedAt),
+          eq(schema.projects.organizationId, orgId!),
+          or(
+            like(schema.projects.name, searchPattern),
+            like(schema.projects.code ?? '', searchPattern),
+            like(schema.projects.description ?? '', searchPattern),
+          )!,
+        ];
+        applyDeptScope(projConditions, scope, schema.projects.departmentId);
         const projects = await db
           .select({
             id: schema.projects.id,
@@ -160,17 +177,7 @@ export const GET = withAuth(
             status: schema.projects.status,
           })
           .from(schema.projects)
-          .where(
-            and(
-              isNull(schema.projects.deletedAt),
-              eq(schema.projects.organizationId, orgId!),
-              or(
-                like(schema.projects.name, searchPattern),
-                like(schema.projects.code ?? '', searchPattern),
-                like(schema.projects.description ?? '', searchPattern),
-              ),
-            ),
-          )
+          .where(and(...projConditions))
           .orderBy(desc(schema.projects.updatedAt))
           .limit(limit);
 

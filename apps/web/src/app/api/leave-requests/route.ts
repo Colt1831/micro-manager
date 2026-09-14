@@ -1,8 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getDb, schema } from '@workmanagement/database';
-import { withAuth } from '@/lib/auth/api-auth';
-import { eq, desc, and, lte, gte, ne } from 'drizzle-orm';
+import { withAuth, checkPermission } from '@/lib/auth/api-auth';
+import { eq, desc, and, lte, gte, ne, or } from 'drizzle-orm';
 import { handleApiError } from '@/lib/api/db';
 import { z } from 'zod';
 
@@ -38,7 +38,7 @@ function calculateDays(startDate: string, endDate: string): number {
 
 // GET /api/leave-requests
 export const GET = withAuth(
-  async (request: NextRequest, { orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const url = new URL(request.url);
       const parsed = RequestFilterSchema.safeParse(Object.fromEntries(url.searchParams));
@@ -48,6 +48,30 @@ export const GET = withAuth(
       const conditions = [
         eq(schema.leaveRequests.organizationId, orgId!),
       ];
+
+      // Visibility (was a bug: any authenticated user saw ALL org leave):
+      //  - self: always sees own requests
+      //  - a manager with `time:manage`: sees their department's requests
+      //    (GM+/super_admin see all departments)
+      //  - everyone else: only their own
+      // Leave has no dept column; scope via the requester's user.departmentId.
+      const canManageLeave = await checkPermission(user.id, 'time:manage');
+      if (canManageLeave && scope.seeAllDepartments) {
+        // sees everything in the org — no extra visibility filter
+      } else if (canManageLeave) {
+        // own requests OR same-department requests (joined via requester's dept).
+        // A manager with no department only ever sees their own.
+        conditions.push(
+          scope.departmentId != null
+            ? or(
+                eq(schema.leaveRequests.userId, user.id),
+                eq(schema.users.departmentId, scope.departmentId),
+              )!
+            : eq(schema.leaveRequests.userId, user.id),
+        );
+      } else {
+        conditions.push(eq(schema.leaveRequests.userId, user.id));
+      }
 
       if (filters.status) {
         conditions.push(eq(schema.leaveRequests.status, filters.status));

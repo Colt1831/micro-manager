@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, desc, and, isNull } from 'drizzle-orm';
@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 
 // GET /api/projects - List projects (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'project:view');
 
@@ -25,6 +25,8 @@ export const GET = withAuth(
         isNull(schema.projects.deletedAt),
         eq(schema.projects.organizationId, orgId!),
       ];
+      // Department wall: GM+/super_admin see all; others only their department.
+      applyDeptScope(conditions, scope, schema.projects.departmentId);
       if (status) conditions.push(eq(schema.projects.status, status));
 
       const projects = await db()
@@ -46,7 +48,7 @@ export const GET = withAuth(
 
 // POST /api/projects - Create project (rate limited: 30 req/min per user)
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'project:create');
 
@@ -57,10 +59,16 @@ export const POST = withAuth(
         return NextResponse.json(err, { status });
       }
 
-      const { name, code, description, ownerId: ownerIdInput, departmentId, teamId, startDate, endDate } =
+      const { name, code, description, ownerId: ownerIdInput, departmentId: departmentIdInput, teamId, startDate, endDate } =
         parsed.data;
       // Owner defaults to the creating user (the create UI has no owner picker).
       const ownerId = ownerIdInput ?? user.id;
+      // Department wall on create: a walled user can only create projects in
+      // their OWN department (ignore any other dept they pass). GM+/super_admin
+      // may target any department, defaulting to none.
+      const departmentId = scope.seeAllDepartments
+        ? (departmentIdInput ?? null)
+        : (scope.departmentId ?? null);
 
       // Validate owner is in same org
       const [owner] = await db()

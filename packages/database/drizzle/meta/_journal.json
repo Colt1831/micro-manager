@@ -36,6 +36,13 @@
       "when": 1789058902031,
       "tag": "0004_add_user_rank",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789405931675,
+      "tag": "0005_add_department_indexes",
+      "breakpoints": true
     }
   ]
 }

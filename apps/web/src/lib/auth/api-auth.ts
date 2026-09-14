@@ -4,6 +4,7 @@ import { requireAuth, AuthError } from './session';
 import { hasPermission, permissionStorage } from '../permissions';
 import { getDb, schema } from '@workmanagement/database';
 import { eq, and, isNull } from 'drizzle-orm';
+import { rankLevel, canSeeAllDepartments } from '@workmanagement/shared';
 import {
   checkRateLimit,
   rateLimitKey,
@@ -21,9 +22,18 @@ import {
 // HTTP methods that change state — CSRF protection applies to these only
 const MUTATION_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
+export type DeptScope = {
+  rank: string | null;
+  level: number;
+  departmentId: string | null;
+  /** GM+ (level >= 50) and super_admin see every department. */
+  seeAllDepartments: boolean;
+};
+
 export type ApiHandlerContext = {
   user: Awaited<ReturnType<typeof requireAuth>>;
   orgId: string | null;
+  scope: DeptScope;
 };
 
 export interface WithAuthRateLimit {
@@ -85,7 +95,7 @@ export function withAuth(
         }
       }
 
-      // Check user status and resolve orgId in a single DB query
+      // Check user status and resolve orgId + dept scope in a single DB query
       const userStatus = await getUserStatus(user.id);
       if (!userStatus.isActive) {
         return NextResponse.json(
@@ -97,6 +107,12 @@ export function withAuth(
       }
 
       const orgId = userStatus.organizationId;
+      const scope: DeptScope = {
+        rank: userStatus.rank,
+        level: rankLevel(userStatus.rank),
+        departmentId: userStatus.departmentId,
+        seeAllDepartments: canSeeAllDepartments(userStatus.rank),
+      };
 
       // Initialize request-scoped permission cache and run the handler
       // inside the AsyncLocalStorage context so all requirePermission() calls
@@ -120,11 +136,11 @@ export function withAuth(
             return rateLimitResponse(result);
           }
 
-          const response = await handler(req, { user, orgId });
+          const response = await handler(req, { user, orgId, scope });
           return addRateLimitHeaders(response, result);
         }
 
-        return handler(req, { user, orgId });
+        return handler(req, { user, orgId, scope });
       });
     } catch (error) {
       if (error instanceof AuthError) {
@@ -166,6 +182,8 @@ export async function requirePermission(userId: string, permissionCode: string):
 interface UserStatus {
   isActive: boolean;
   organizationId: string | null;
+  rank: string | null;
+  departmentId: string | null;
 }
 
 export async function getUserStatus(userId: string): Promise<UserStatus> {
@@ -176,18 +194,24 @@ export async function getUserStatus(userId: string): Promise<UserStatus> {
         isActive: schema.users.isActive,
         isSuspended: schema.users.isSuspended,
         organizationId: schema.users.organizationId,
+        rank: schema.users.rank,
+        departmentId: schema.users.departmentId,
       })
       .from(schema.users)
       .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)))
       .limit(1);
 
-    if (!user) return { isActive: false, organizationId: null };
+    if (!user) {
+      return { isActive: false, organizationId: null, rank: null, departmentId: null };
+    }
     return {
       isActive: user.isActive === true && user.isSuspended !== true,
       organizationId: user.organizationId ?? null,
+      rank: user.rank ?? null,
+      departmentId: user.departmentId ?? null,
     };
   } catch {
-    return { isActive: false, organizationId: null };
+    return { isActive: false, organizationId: null, rank: null, departmentId: null };
   }
 }
 

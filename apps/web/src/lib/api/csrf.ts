@@ -90,10 +90,11 @@ export function validateOrigin(
 }
 
 /**
- * Validate the Referer header as a fallback when Origin is not present.
- *
- * Only used when Origin is absent — the Referer is less reliable
- * because it can be suppressed by Referrer-Policy headers.
+ * Validate the Referer header. This is only ever called as the fallback after
+ * the Origin header already failed validation, so an ABSENT Referer here means
+ * we have no proof the request is same-origin — reject it (no silent pass).
+ * The Referer is otherwise less reliable than Origin (Referrer-Policy can strip
+ * it), which is why Origin is checked first.
  */
 export function validateReferer(
   request: NextRequest | Request,
@@ -101,8 +102,8 @@ export function validateReferer(
 ): { valid: boolean; reason?: string } {
   const referer = request.headers.get('referer');
   if (!referer) {
-    // No Origin and no Referer — allow through (auth layer still applies)
-    return { valid: true };
+    // Origin failed AND no Referer to fall back on → cannot prove same-origin.
+    return { valid: false, reason: 'Origin invalid and no Referer header present' };
   }
 
   try {

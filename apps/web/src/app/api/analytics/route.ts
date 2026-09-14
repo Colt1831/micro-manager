@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getDb, schema } from '@workmanagement/database';
-import { withAuth, requirePermission } from '@/lib/auth/api-auth';
-import { and, gte, lte, eq, isNull, sql } from 'drizzle-orm';
+import { withAuth, requirePermission, type DeptScope } from '@/lib/auth/api-auth';
+import { and, gte, lte, eq, isNull, sql, type SQL } from 'drizzle-orm';
+import { applyDeptScope } from '@/lib/api/db';
 
 export const runtime = 'nodejs';
 
@@ -76,15 +77,17 @@ async function computeTrends(
   orgId: string,
   startDate: Date,
   endDate: Date,
+  scope: DeptScope,
   projectId?: string,
 ): Promise<TrendData> {
   const db = getDb();
 
-  // Base conditions for the org
-  const baseConditions = [
+  // Base conditions for the org + department wall.
+  const baseConditions: SQL[] = [
     eq(schema.tasks.organizationId, orgId),
     isNull(schema.tasks.deletedAt),
   ];
+  applyDeptScope(baseConditions, scope, schema.tasks.departmentId);
   if (projectId) baseConditions.push(eq(schema.tasks.projectId, projectId));
 
   // Total tasks in range
@@ -192,15 +195,17 @@ async function computeBurndown(
   orgId: string,
   startDate: Date,
   endDate: Date,
+  scope: DeptScope,
   projectId?: string,
 ): Promise<BurndownPoint[]> {
   const db = getDb();
   const totalDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / 86400000));
 
-  const baseConditions = [
+  const baseConditions: SQL[] = [
     eq(schema.tasks.organizationId, orgId),
     isNull(schema.tasks.deletedAt),
   ];
+  applyDeptScope(baseConditions, scope, schema.tasks.departmentId);
   if (projectId) baseConditions.push(eq(schema.tasks.projectId, projectId));
 
   // Total tasks created before or during this period
@@ -271,14 +276,16 @@ async function computeVelocity(
   orgId: string,
   startDate: Date,
   endDate: Date,
+  scope: DeptScope,
   projectId?: string,
 ): Promise<VelocityPoint[]> {
   const db = getDb();
 
-  const baseConditions = [
+  const baseConditions: SQL[] = [
     eq(schema.tasks.organizationId, orgId),
     isNull(schema.tasks.deletedAt),
   ];
+  applyDeptScope(baseConditions, scope, schema.tasks.departmentId);
   if (projectId) baseConditions.push(eq(schema.tasks.projectId, projectId));
 
   const points: VelocityPoint[] = [];
@@ -332,7 +339,7 @@ async function computeVelocity(
 
 // POST /api/analytics - Compute analytics data
 export const POST = withAuth(
-  async (request: Request, { user, orgId }) => {
+  async (request: Request, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'report:view');
 
@@ -347,9 +354,9 @@ export const POST = withAuth(
       const projectId = body.projectId;
 
       const [trends, burndown, velocity] = await Promise.all([
-        computeTrends(orgId!, startDate, endDate, projectId),
-        computeBurndown(orgId!, startDate, endDate, projectId),
-        computeVelocity(orgId!, startDate, endDate, projectId),
+        computeTrends(orgId!, startDate, endDate, scope, projectId),
+        computeBurndown(orgId!, startDate, endDate, scope, projectId),
+        computeVelocity(orgId!, startDate, endDate, scope, projectId),
       ]);
 
       const response: AnalyticsResponse = {

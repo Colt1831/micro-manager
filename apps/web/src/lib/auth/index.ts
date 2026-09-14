@@ -47,10 +47,9 @@ export function getAuth(): ReturnType<typeof betterAuth> {
       requireEmailVerification: false,
       async sendResetPassword(data: { user: { email: string }; url: string }, _request: unknown) {
         const logger = (await import('@/lib/logger')).default;
-        logger.info(
-          { email: data.user.email, url: data.url },
-          '[auth] Password reset requested',
-        );
+        // Do NOT log the reset URL at info level — it carries a live,
+        // single-use token that grants password reset. Log only the subject.
+        logger.info({ email: data.user.email }, '[auth] Password reset requested');
 
         // In development, log the reset URL so devs can copy-paste it
         if (process.env.NODE_ENV !== 'production') {

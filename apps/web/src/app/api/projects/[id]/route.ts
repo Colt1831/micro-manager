@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull, sql } from 'drizzle-orm';
@@ -16,7 +16,7 @@ function getIdFromPath(request: NextRequest): string {
 
 // GET /api/projects/[id] - Get single project with owner/task info (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
 
@@ -65,6 +65,14 @@ export const GET = withAuth(
 
       enforceOrgScope(project.organizationId, orgId);
 
+      // Department wall: a walled user must not read a project outside their dept.
+      if (!canAccessDept(scope, project.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Project not found' } },
+          { status: 404 },
+        );
+      }
+
       // Get task stats for the project
       const taskCounts = await db()
         .select({
@@ -109,7 +117,7 @@ export const GET = withAuth(
 
 // PATCH /api/projects/[id] - Update project (rate limited: 60 req/min per user)
 export const PATCH = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'project:edit');
@@ -151,6 +159,14 @@ export const PATCH = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall: a walled user cannot mutate a project outside their dept.
+      if (!canAccessDept(scope, existing.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Project not found' } },
+          { status: 404 },
+        );
+      }
 
       const oldValues: Record<string, unknown> = {};
       const newValues: Record<string, unknown> = {};
@@ -264,7 +280,7 @@ export const PATCH = withAuth(
 
 // DELETE /api/projects/[id] - Soft delete project (rate limited: 30 req/min per user)
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'project:delete');
@@ -283,6 +299,14 @@ export const DELETE = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall: a walled user cannot delete a project outside their dept.
+      if (!canAccessDept(scope, existing.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Project not found' } },
+          { status: 404 },
+        );
+      }
 
       await db()
         .update(schema.projects)

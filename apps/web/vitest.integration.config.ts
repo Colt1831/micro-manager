@@ -22,6 +22,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Workspace package isn't symlinked under node_modules — mirror tsconfig paths.
+      '@workmanagement/shared': path.resolve(__dirname, '../../packages/shared/src'),
     },
   },
 });

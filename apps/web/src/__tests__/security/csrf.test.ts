@@ -105,9 +105,9 @@ describe('validateReferer', () => {
     expect(result.reason).toContain('evil.com');
   });
 
-  it('allows requests with no Referer header', () => {
+  it('rejects requests with no Referer header (fallback after Origin failed → no same-origin proof)', () => {
     const req = mockRequest();
-    expect(validateReferer(req, ALLOWED_ORIGINS)).toEqual({ valid: true });
+    expect(validateReferer(req, ALLOWED_ORIGINS).valid).toBe(false);
   });
 
   it('handles invalid Referer URL gracefully', () => {
@@ -117,9 +117,9 @@ describe('validateReferer', () => {
     expect(result.reason).toContain('not-a-valid-url');
   });
 
-  it('handles empty Referer header', () => {
+  it('rejects an empty Referer header (no same-origin proof)', () => {
     const req = mockRequest(undefined, '');
-    expect(validateReferer(req, ALLOWED_ORIGINS)).toEqual({ valid: true });
+    expect(validateReferer(req, ALLOWED_ORIGINS).valid).toBe(false);
   });
 });
 
@@ -172,5 +172,7 @@ describe('CSRF validation flow (Origin → Referer fallback)', () => {
   it('fails when bad Origin is present but good Referer is absent', () => {
     const req = mockRequest('https://evil.com');
     expect(validateOrigin(req, allowed).valid).toBe(false);
+    // Fallback must also reject — no Referer means no same-origin proof.
+    expect(validateReferer(req, allowed).valid).toBe(false);
   });
 });

@@ -51,6 +51,57 @@ export async function insertUser(email?: string): Promise<string> {
   return row!.id;
 }
 
+// ─── Department fixtures (Phase 2 isolation wall) ───────────
+
+export async function insertDepartment(organizationId: string, name = 'Dept'): Promise<string> {
+  const [row] = await testDb()
+    .insert(schema.departments)
+    .values({ organizationId, name })
+    .returning({ id: schema.departments.id });
+  return row!.id;
+}
+
+/** A user with an explicit rank + department, for wall tests. */
+export async function insertRankedUser(opts: {
+  organizationId: string;
+  rank?: string;
+  departmentId?: string | null;
+  email?: string;
+}): Promise<string> {
+  const id = randomUUID();
+  const [row] = await testDb()
+    .insert(schema.users)
+    .values({
+      id,
+      email: opts.email ?? `u-${id.slice(0, 8)}@test.local`,
+      organizationId: opts.organizationId,
+      rank: opts.rank ?? 'executive',
+      departmentId: opts.departmentId ?? null,
+    })
+    .returning({ id: schema.users.id });
+  return row!.id;
+}
+
+/** A task pinned to a specific department, for wall tests. */
+export async function insertDeptTask(
+  organizationId: string,
+  createdBy: string,
+  departmentId: string | null,
+  title = 'Dept task',
+): Promise<string> {
+  const [row] = await testDb()
+    .insert(schema.tasks)
+    .values({
+      organizationId,
+      createdBy,
+      title,
+      departmentId,
+      taskIdDisplay: `T-${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning({ id: schema.tasks.id });
+  return row!.id;
+}
+
 export async function insertTask(
   organizationId: string,
   createdBy: string,
