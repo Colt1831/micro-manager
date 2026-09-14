@@ -24,7 +24,7 @@ let warmedUp = false;
 test.beforeEach(async ({ page }) => {
   if (!warmedUp) {
     warmedUp = true;
-    await page.goto('/auth/login', { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto('/auth/login', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   }
 });
 
@@ -38,7 +38,7 @@ test.beforeEach(async ({ page }) => {
  * The tagline renders in both the connected and unconnected states.
  */
 async function goToSlackTab(page: import('@playwright/test').Page) {
-  await page.goto('/settings', { waitUntil: 'networkidle', timeout: 30_000 });
+  await page.goto('/settings', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible({
     timeout: 15_000,
   });
@@ -315,7 +315,7 @@ test.describe('Slack Settings — Navigation', () => {
   test('navigates to the Slack tab with keyboard shortcut 5', async ({ page }) => {
     await mockSettingsApis(page);
     await mockSlackSettingsApis(page, { integration: null });
-    await page.goto('/settings', { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto('/settings', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible({
       timeout: 15_000,
     });

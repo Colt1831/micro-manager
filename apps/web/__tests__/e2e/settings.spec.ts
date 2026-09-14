@@ -20,7 +20,7 @@ let warmedUp = false;
 test.beforeEach(async ({ page }) => {
   if (!warmedUp) {
     warmedUp = true;
-    await page.goto('/auth/login', { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto('/auth/login', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   }
 });
 
@@ -33,7 +33,7 @@ test.beforeEach(async ({ page }) => {
  * Returns once the Notifications tab content is hydrated.
  */
 async function goToNotificationsTab(page: import('@playwright/test').Page) {
-  await page.goto('/settings', { waitUntil: 'networkidle', timeout: 30_000 });
+  await page.goto('/settings', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   // Wait for the page to hydrate — settings heading should appear
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible({
     timeout: 15_000,

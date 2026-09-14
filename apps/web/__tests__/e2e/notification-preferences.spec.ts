@@ -15,7 +15,7 @@ let warmedUp = false;
 test.beforeEach(async ({ page }) => {
   if (!warmedUp) {
     warmedUp = true;
-    await page.goto('/auth/login', { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto('/auth/login', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   }
 });
 
@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
  * Returns once the Notifications tab content is hydrated.
  */
 async function goToNotificationsTab(page: import('@playwright/test').Page) {
-  await page.goto('/settings', { waitUntil: 'networkidle', timeout: 30_000 });
+  await page.goto('/settings', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible({
     timeout: 15_000,
   });
@@ -455,7 +455,7 @@ test.describe('Notification Preferences — Digest', () => {
 test.describe('Notification Preferences — Keyboard Shortcuts', () => {
   test('navigates to notifications tab with key 7', async ({ page }) => {
     await mockSettingsApis(page);
-    await page.goto('/settings', { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto('/settings', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible({
       timeout: 15_000,
     });
@@ -471,7 +471,7 @@ test.describe('Notification Preferences — Keyboard Shortcuts', () => {
 
   test('navigates back to general tab with key 1', async ({ page }) => {
     await mockSettingsApis(page);
-    await page.goto('/settings', { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto('/settings', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible({
       timeout: 15_000,
     });
