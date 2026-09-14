@@ -5,6 +5,7 @@ import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-aut
 import { createAuditEntry } from '@/lib/audit';
 import { eq, desc, and, isNull, sql } from 'drizzle-orm';
 import { DepartmentUpdateSchema, validationError } from '@/lib/api/validation';
+import { assertUserSameOrg } from '@/lib/api/cross-ref';
 
 export const runtime = 'nodejs';
 
@@ -151,6 +152,17 @@ export const PATCH = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Cross-tenant guard: replacement head user must be same-org.
+      if (headUserId != null) {
+        const denial = await assertUserSameOrg(headUserId, orgId);
+        if (denial) {
+          return NextResponse.json(
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
+          );
+        }
+      }
 
       const oldValues: Record<string, unknown> = {};
       const newValues: Record<string, unknown> = {};

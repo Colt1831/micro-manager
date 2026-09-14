@@ -10,6 +10,8 @@ import { indexTask } from '@/lib/search';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { extractAndResolveMentions } from '@/lib/mentions';
 import { createNotification } from '@/lib/notifications';
+import { validateAssignment } from '@/lib/api/assignment';
+import { assertMilestoneSameOrg } from '@/lib/api/cross-ref';
 
 export const runtime = 'nodejs';
 
@@ -156,7 +158,7 @@ export const GET = withAuth(
 
 // POST /api/tasks - Create task (rate limited: 30 req/min per user)
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'task:create');
 
@@ -207,39 +209,25 @@ export const POST = withAuth(
         }
       }
 
-      // Validate assignedTo is in same org if provided
+      // Validate assignedTo via the shared downward+department rule (§4)
       if (assignedTo) {
-        const [assigneeUser] = await db()
-          .select({
-            id: schema.users.id,
-            organizationId: schema.users.organizationId,
-            isActive: schema.users.isActive,
-            isSuspended: schema.users.isSuspended,
-          })
-          .from(schema.users)
-          .where(eq(schema.users.id, assignedTo))
-          .limit(1);
-        if (!assigneeUser) {
+        const denial = await validateAssignment(scope, assignedTo, orgId);
+        if (denial) {
           return NextResponse.json(
-            { error: { code: 'NOT_FOUND', message: 'Assigned user not found' } },
-            { status: 404 },
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
           );
         }
-        if (assigneeUser.organizationId !== orgId) {
+      }
+
+      // Cross-tenant guard: a milestone must be same-org and (if a project is
+      // given) belong to that project.
+      if (milestoneId) {
+        const denial = await assertMilestoneSameOrg(milestoneId, orgId, projectId);
+        if (denial) {
           return NextResponse.json(
-            { error: { code: 'FORBIDDEN', message: 'Cross-organization assignment denied' } },
-            { status: 403 },
-          );
-        }
-        if (!assigneeUser.isActive || assigneeUser.isSuspended) {
-          return NextResponse.json(
-            {
-              error: {
-                code: 'INVALID_STATE',
-                message: 'Cannot assign task to inactive or suspended user',
-              },
-            },
-            { status: 422 },
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
           );
         }
       }

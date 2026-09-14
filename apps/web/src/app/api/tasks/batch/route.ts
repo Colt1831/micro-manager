@@ -1,12 +1,18 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications';
 import { eq, and, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { VALID_PRIORITIES, READONLY_STATUSES } from '@/lib/api/validation';
+import {
+  VALID_PRIORITIES,
+  READONLY_STATUSES,
+  isValidTransition,
+} from '@/lib/api/validation';
+import { validateAssignment } from '@/lib/api/assignment';
+import { indexTask, removeTaskFromIndex } from '@/lib/search';
 
 export const runtime = 'nodejs';
 
@@ -30,7 +36,7 @@ export const BatchUpdateSchema = z
 
 // POST /api/tasks/batch - Perform batch operations on tasks
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const body = await request.json();
       const parsed = BatchUpdateSchema.safeParse(body);
@@ -55,7 +61,8 @@ export const POST = withAuth(
           ? sql`${schema.tasks.deletedAt} IS NOT NULL`
           : isNull(schema.tasks.deletedAt);
 
-      // Verify all tasks exist and belong to the org
+      // Verify all tasks exist and belong to the org. Load status + department so
+      // the same transition + dept-wall rules single updates enforce apply here.
       const tasks = await db()
         .select({
           id: schema.tasks.id,
@@ -64,6 +71,7 @@ export const POST = withAuth(
           title: schema.tasks.title,
           taskIdDisplay: schema.tasks.taskIdDisplay,
           assignedTo: schema.tasks.assignedTo,
+          departmentId: schema.tasks.departmentId,
         })
         .from(schema.tasks)
         .where(and(inArray(schema.tasks.id, taskIds), deletedCondition));
@@ -75,12 +83,19 @@ export const POST = withAuth(
         );
       }
 
-      // Verify all tasks belong to the same org
+      // Verify all tasks belong to the same org AND are within the actor's
+      // department wall (a walled user cannot batch-touch cross-dept tasks).
       for (const task of tasks) {
         if (task.organizationId !== orgId) {
           return NextResponse.json(
             { error: { code: 'FORBIDDEN', message: 'Cross-organization operation denied' } },
             { status: 403 },
+          );
+        }
+        if (!canAccessDept(scope, task.departmentId)) {
+          return NextResponse.json(
+            { error: { code: 'NOT_FOUND', message: 'One or more tasks not found' } },
+            { status: 404 },
           );
         }
       }
@@ -112,6 +127,24 @@ export const POST = withAuth(
           .set({ deletedAt: null, updatedAt: new Date(), updatedBy: user.id })
           .where(inArray(schema.tasks.id, taskIds));
 
+        for (const task of tasks) {
+          indexTask({
+            id: task.id,
+            title: task.title,
+            description: null,
+            taskIdDisplay: task.taskIdDisplay,
+            status: task.status,
+            priority: 'medium',
+            assignedTo: task.assignedTo ?? null,
+            projectId: null,
+            organizationId: orgId!,
+            labels: null,
+            tags: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
         updatedCount = taskIds.length;
       } else if (action === 'delete') {
         // Bulk soft delete
@@ -122,14 +155,105 @@ export const POST = withAuth(
           .set({ deletedAt: new Date(), updatedAt: new Date(), updatedBy: user.id })
           .where(inArray(schema.tasks.id, taskIds));
 
+        for (const task of tasks) removeTaskFromIndex(task.id);
+
         updatedCount = taskIds.length;
       } else if (action === 'change_status') {
         await requirePermission(user.id, 'task:edit');
 
-        await db()
-          .update(schema.tasks)
-          .set({ status: value, updatedBy: user.id, updatedAt: new Date() })
-          .where(inArray(schema.tasks.id, taskIds));
+        // Same state machine as the single-update path: every task must have a
+        // VALID transition to the target status — no bypass, no direct write.
+        for (const task of tasks) {
+          if (task.status === value) continue;
+          if (!isValidTransition(task.status, value)) {
+            return NextResponse.json(
+              {
+                error: {
+                  code: 'INVALID_STATE',
+                  message: `Invalid status transition from '${task.status}' to '${value}' for task ${task.taskIdDisplay}`,
+                },
+              },
+              { status: 422 },
+            );
+          }
+        }
+
+        // Per-status permission parity with the single-update path.
+        if (value === 'closed') await requirePermission(user.id, 'task:close');
+        if (value === 'reopened') await requirePermission(user.id, 'task:reopen');
+
+        const now = new Date();
+        for (const task of tasks) {
+          if (task.status === value) continue;
+
+          const patch: Record<string, unknown> = {
+            status: value,
+            updatedBy: user.id,
+            updatedAt: now,
+          };
+          if (value === 'completed') {
+            patch.completedAt = now;
+            patch.completionSummary = `${task.title} completed by ${user.id}`;
+          }
+          if (value === 'closed') {
+            patch.closedAt = now;
+            patch.closedBy = user.id;
+          }
+
+          await db().update(schema.tasks).set(patch).where(eq(schema.tasks.id, task.id));
+
+          // History parity with single update.
+          await db()
+            .insert(schema.taskHistory)
+            .values({
+              taskId: task.id,
+              userId: user.id,
+              field: 'status',
+              oldValue: task.status,
+              newValue: value,
+              changeType: 'status_change',
+              description: `Status changed from ${task.status} to ${value}`,
+            });
+
+          // Reindex parity.
+          indexTask({
+            id: task.id,
+            title: task.title,
+            description: null,
+            taskIdDisplay: task.taskIdDisplay,
+            status: value,
+            priority: 'medium',
+            assignedTo: task.assignedTo ?? null,
+            projectId: null,
+            organizationId: orgId!,
+            labels: null,
+            tags: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: now.toISOString(),
+          });
+
+          // Notification parity: notify the assignee (unless they made the change).
+          if (task.assignedTo && task.assignedTo !== user.id) {
+            await createNotification({
+              organizationId: orgId!,
+              userId: task.assignedTo,
+              type:
+                value === 'completed'
+                  ? 'task.completed'
+                  : value === 'closed'
+                    ? 'task.closed'
+                    : value === 'reopened'
+                      ? 'task.reopened'
+                      : 'task.status_changed',
+              title: `${task.title} moved to ${value}`,
+              message: `Status changed from ${task.status} to ${value}`,
+              link: `/tasks/${task.id}`,
+              actorId: user.id,
+              entityType: 'task',
+              entityId: task.id,
+            });
+          }
+        }
 
         updatedCount = taskIds.length;
       } else if (action === 'change_priority') {
@@ -154,45 +278,18 @@ export const POST = withAuth(
 
         await db().delete(schema.tasks).where(inArray(schema.tasks.id, taskIds));
 
+        for (const task of tasks) removeTaskFromIndex(task.id);
+
         updatedCount = taskIds.length;
       } else if (action === 'assign') {
         await requirePermission(user.id, 'task:assign');
 
-        // Validate assignee belongs to the org
-        const [assignee] = await db()
-          .select({
-            id: schema.users.id,
-            organizationId: schema.users.organizationId,
-            isActive: schema.users.isActive,
-            isSuspended: schema.users.isSuspended,
-          })
-          .from(schema.users)
-          .where(eq(schema.users.id, value))
-          .limit(1);
-
-        if (!assignee) {
+        // Same downward+department rule as single-assign (§4), via the shared helper.
+        const denial = await validateAssignment(scope, value, orgId);
+        if (denial) {
           return NextResponse.json(
-            { error: { code: 'NOT_FOUND', message: 'Assigned user not found' } },
-            { status: 404 },
-          );
-        }
-
-        if (assignee.organizationId !== orgId) {
-          return NextResponse.json(
-            { error: { code: 'FORBIDDEN', message: 'Cross-organization assignment denied' } },
-            { status: 403 },
-          );
-        }
-
-        if (!assignee.isActive || assignee.isSuspended) {
-          return NextResponse.json(
-            {
-              error: {
-                code: 'INVALID_STATE',
-                message: 'Cannot assign tasks to inactive or suspended user',
-              },
-            },
-            { status: 422 },
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
           );
         }
 
@@ -206,21 +303,33 @@ export const POST = withAuth(
           })
           .where(inArray(schema.tasks.id, taskIds));
 
-        // Notify the assignee about each newly assigned task
+        // History + notification parity for each newly assigned task.
         for (const task of tasks) {
-          if (task.assignedTo !== value) {
-            await createNotification({
-              organizationId: orgId!,
-              userId: value,
-              type: 'task.assigned',
-              title: `You've been assigned: ${task.title}`,
-              message: `Task #${task.taskIdDisplay} was assigned to you (batch)`,
-              link: `/tasks/${task.id}`,
-              actorId: user.id,
-              entityType: 'task',
-              entityId: task.id,
+          if (task.assignedTo === value) continue;
+
+          await db()
+            .insert(schema.taskHistory)
+            .values({
+              taskId: task.id,
+              userId: user.id,
+              field: 'assignedTo',
+              oldValue: task.assignedTo ?? null,
+              newValue: value,
+              changeType: 'assignment',
+              description: `Assigned to ${value}`,
             });
-          }
+
+          await createNotification({
+            organizationId: orgId!,
+            userId: value,
+            type: 'task.assigned',
+            title: `You've been assigned: ${task.title}`,
+            message: `Task #${task.taskIdDisplay} was assigned to you (batch)`,
+            link: `/tasks/${task.id}`,
+            actorId: user.id,
+            entityType: 'task',
+            entityId: task.id,
+          });
         }
 
         updatedCount = taskIds.length;

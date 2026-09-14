@@ -5,7 +5,7 @@ import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications';
 import { eq, desc, and, isNull } from 'drizzle-orm';
-import { CommentCreateSchema, validationError } from '@/lib/api/validation';
+import { CommentCreateSchema, validationError, READONLY_STATUSES } from '@/lib/api/validation';
 import { sanitizeRichText } from '@/lib/sanitize';
 import { getTaskIdFromPath, checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
@@ -94,10 +94,15 @@ export const POST = withAuth(
       const accessError = checkTaskAccessOrRespond(task, orgId);
       if (accessError) return accessError;
 
-      // Block comments on archived tasks
-      if (task!.status === 'archived') {
+      // Block comments on closed/archived (read-only) tasks
+      if (READONLY_STATUSES.has(task!.status)) {
         return NextResponse.json(
-          { error: { code: 'INVALID_STATE', message: 'Cannot comment on archived tasks' } },
+          {
+            error: {
+              code: 'INVALID_STATE',
+              message: `Cannot comment on a '${task!.status}' task`,
+            },
+          },
           { status: 422 },
         );
       }
@@ -244,6 +249,24 @@ export const DELETE = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'You can only delete your own comments' } },
           { status: 403 },
+        );
+      }
+
+      // Block deletion when the parent task is closed/archived (read-only).
+      const [parentTask] = await db()
+        .select({ status: schema.tasks.status })
+        .from(schema.tasks)
+        .where(eq(schema.tasks.id, taskId))
+        .limit(1);
+      if (parentTask && READONLY_STATUSES.has(parentTask.status)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'INVALID_STATE',
+              message: `Cannot modify comments on a '${parentTask.status}' task`,
+            },
+          },
+          { status: 422 },
         );
       }
 

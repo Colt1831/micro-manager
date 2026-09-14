@@ -1,18 +1,20 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, sql } from 'drizzle-orm';
 import { indexTask } from '@/lib/search';
+import { getTaskIdFromPath } from '@/lib/api/task-helpers';
 
 export const runtime = 'nodejs';
 
 // POST /api/tasks/[id]/restore - Restore a soft-deleted task (rate limited: 30 req/min per user)
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
-      const id = request.nextUrl.pathname.split('/').pop()!;
+      // The last path segment is 'restore', not the id — parse the id after 'tasks'.
+      const id = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:delete');
 
       // Find the deleted task (allow deletedAt IS NOT NULL)
@@ -30,6 +32,14 @@ export const POST = withAuth(
       }
 
       enforceOrgScope(task.organizationId, orgId);
+
+      // Department wall: a walled user cannot restore a task outside their dept.
+      if (!canAccessDept(scope, task.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Deleted task not found' } },
+          { status: 404 },
+        );
+      }
 
       // Restore by setting deletedAt to null
       const [restored] = await db()

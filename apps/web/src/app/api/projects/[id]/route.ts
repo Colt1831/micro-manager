@@ -7,6 +7,7 @@ import { eq, and, isNull, sql } from 'drizzle-orm';
 import { ProjectUpdateSchema, validationError } from '@/lib/api/validation';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { indexProject, removeProjectFromIndex } from '@/lib/search';
+import { assertUserSameOrg, assertDepartmentSameOrg, assertTeamSameOrg } from '@/lib/api/cross-ref';
 
 export const runtime = 'nodejs';
 
@@ -168,9 +169,22 @@ export const PATCH = withAuth(
         );
       }
 
+      // Cross-tenant guards: replacement owner/department/team must be same-org.
+      for (const denial of [
+        ownerId != null ? await assertUserSameOrg(ownerId, orgId) : null,
+        departmentId != null ? await assertDepartmentSameOrg(departmentId, orgId) : null,
+        teamId != null ? await assertTeamSameOrg(teamId, orgId) : null,
+      ]) {
+        if (denial) {
+          return NextResponse.json(
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
+          );
+        }
+      }
+
       const oldValues: Record<string, unknown> = {};
       const newValues: Record<string, unknown> = {};
-
       if (name !== undefined) {
         oldValues.name = existing.name;
         newValues.name = name;

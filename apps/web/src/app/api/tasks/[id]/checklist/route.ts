@@ -5,6 +5,7 @@ import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, asc, desc, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { READONLY_STATUSES } from '@/lib/api/validation';
 
 export const runtime = 'nodejs';
 
@@ -119,6 +120,19 @@ export const POST = withAuth(
         );
       }
 
+      // Block checklist mutations on closed/archived (read-only) tasks.
+      if (READONLY_STATUSES.has(task.status)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'INVALID_STATE',
+              message: `Cannot modify checklist on a '${task.status}' task`,
+            },
+          },
+          { status: 422 },
+        );
+      }
+
       // Determine next sort order if not provided
       let finalSortOrder = sortOrder;
       if (finalSortOrder === undefined) {
@@ -222,6 +236,19 @@ export const PATCH = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Access denied' } },
           { status: 403 },
+        );
+      }
+
+      // Block checklist mutations on closed/archived (read-only) tasks.
+      if (READONLY_STATUSES.has(task.status)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'INVALID_STATE',
+              message: `Cannot modify checklist on a '${task.status}' task`,
+            },
+          },
+          { status: 422 },
         );
       }
 
@@ -330,6 +357,19 @@ export const DELETE = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Access denied' } },
           { status: 403 },
+        );
+      }
+
+      // Block checklist mutations on closed/archived (read-only) tasks.
+      if (READONLY_STATUSES.has(task.status)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'INVALID_STATE',
+              message: `Cannot modify checklist on a '${task.status}' task`,
+            },
+          },
+          { status: 422 },
         );
       }
 

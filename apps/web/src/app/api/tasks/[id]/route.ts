@@ -16,6 +16,7 @@ import type { AutomationContext } from '@/lib/automation/engine';
 import { indexTask, removeTaskFromIndex } from '@/lib/search';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { extractAndResolveMentions } from '@/lib/mentions';
+import { validateAssignment } from '@/lib/api/assignment';
 
 export const runtime = 'nodejs';
 
@@ -114,17 +115,37 @@ export const PATCH = withAuth(
         );
       }
 
-      // ── Readonly enforcement: closed/archived tasks cannot be edited ──
+      // ── Readonly enforcement: closed/archived tasks are locked for generic
+      // edits, but a VALID status transition out of them must still work
+      // (e.g. closed → reopened, closed → archived per TASK_STATUS_TRANSITIONS).
+      // So the only mutation permitted on a readonly task is a status change to
+      // a valid target — any other field, or an invalid/absent transition, is
+      // rejected. This runs BEFORE the transition check below, which validates
+      // the target itself.
       if (READONLY_STATUSES.has(existing.status)) {
-        return NextResponse.json(
-          {
-            error: {
-              code: 'INVALID_STATE',
-              message: `Tasks with status '${existing.status}' cannot be edited`,
+        const otherFieldChanged =
+          title !== undefined ||
+          description !== undefined ||
+          priority !== undefined ||
+          assignedTo !== undefined ||
+          projectId !== undefined ||
+          dueDate !== undefined;
+        const isStatusTransition =
+          status !== undefined &&
+          status !== existing.status &&
+          isValidTransition(existing.status, status);
+
+        if (otherFieldChanged || !isStatusTransition) {
+          return NextResponse.json(
+            {
+              error: {
+                code: 'INVALID_STATE',
+                message: `Tasks with status '${existing.status}' cannot be edited`,
+              },
             },
-          },
-          { status: 422 },
-        );
+            { status: 422 },
+          );
+        }
       }
 
       // ── Status transition enforcement ──
@@ -151,39 +172,13 @@ export const PATCH = withAuth(
         }
       }
 
-      // ── Validate assignedTo belongs to same org (if changing) ──
+      // ── Validate assignedTo via the shared downward+department rule (§4) ──
       if (assignedTo !== undefined && assignedTo !== null) {
-        const [assigneeUser] = await db()
-          .select({
-            id: schema.users.id,
-            organizationId: schema.users.organizationId,
-            isActive: schema.users.isActive,
-            isSuspended: schema.users.isSuspended,
-          })
-          .from(schema.users)
-          .where(eq(schema.users.id, assignedTo))
-          .limit(1);
-        if (!assigneeUser) {
+        const denial = await validateAssignment(scope, assignedTo, orgId);
+        if (denial) {
           return NextResponse.json(
-            { error: { code: 'NOT_FOUND', message: 'Assigned user not found' } },
-            { status: 404 },
-          );
-        }
-        if (assigneeUser.organizationId !== orgId) {
-          return NextResponse.json(
-            { error: { code: 'FORBIDDEN', message: 'Cross-organization assignment denied' } },
-            { status: 403 },
-          );
-        }
-        if (!assigneeUser.isActive || assigneeUser.isSuspended) {
-          return NextResponse.json(
-            {
-              error: {
-                code: 'INVALID_STATE',
-                message: 'Cannot assign task to inactive or suspended user',
-              },
-            },
-            { status: 422 },
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
           );
         }
       }
@@ -272,6 +267,16 @@ export const PATCH = withAuth(
         updateData.closedBy = user.id;
       }
 
+      // ── Detect @mention changes in description BEFORE the write so the new
+      // mention set actually persists (previously assigned after the update). ──
+      let newMentionedIds: string[] = [];
+      if (description !== undefined) {
+        newMentionedIds = await extractAndResolveMentions(orgId!, description, user.id);
+        const currentMentioned = (existing.mentionedUserIds as string[] | null) ?? [];
+        const allMentioned = Array.from(new Set([...currentMentioned, ...newMentionedIds]));
+        updateData.mentionedUserIds = allMentioned;
+      }
+
       const [task] = await db()
         .update(schema.tasks)
         .set(updateData)
@@ -311,15 +316,6 @@ export const PATCH = withAuth(
               description: `Status changed from ${existing.status} to ${status}`,
             });
         }
-      }
-
-      // ── Detect @mention changes in description ────────────────
-      let newMentionedIds: string[] = [];
-      if (description !== undefined) {
-        newMentionedIds = await extractAndResolveMentions(orgId!, description, user.id);
-        const currentMentioned = (existing.mentionedUserIds as string[] | null) ?? [];
-        const allMentioned = Array.from(new Set([...currentMentioned, ...newMentionedIds]));
-        updateData.mentionedUserIds = allMentioned;
       }
 
       // ── Create notifications for assignment changes ────────────

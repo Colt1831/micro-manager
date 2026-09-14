@@ -5,6 +5,7 @@ import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-aut
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { TeamUpdateSchema, validationError } from '@/lib/api/validation';
+import { assertUserSameOrg, assertDepartmentSameOrg } from '@/lib/api/cross-ref';
 
 export const runtime = 'nodejs';
 
@@ -168,6 +169,19 @@ export const PATCH = withAuth(
           { error: { code: 'NOT_FOUND', message: 'Team not found' } },
           { status: 404 },
         );
+      }
+
+      // Cross-tenant guards: replacement lead/department must be same-org.
+      for (const denial of [
+        leadUserId != null ? await assertUserSameOrg(leadUserId, orgId) : null,
+        departmentId != null ? await assertDepartmentSameOrg(departmentId, orgId) : null,
+      ]) {
+        if (denial) {
+          return NextResponse.json(
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
+          );
+        }
       }
 
       const oldValues: Record<string, unknown> = {};

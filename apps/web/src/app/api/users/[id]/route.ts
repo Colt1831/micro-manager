@@ -5,6 +5,7 @@ import { withAuth, enforceOrgScope, requirePermission, getUserRank } from '@/lib
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull } from 'drizzle-orm';
 import { canGrantRank, isRank } from '@workmanagement/shared';
+import { assertDepartmentSameOrg, assertTeamSameOrg } from '@/lib/api/cross-ref';
 
 export const runtime = 'nodejs';
 
@@ -97,6 +98,19 @@ export const PATCH = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Cross-tenant guards: replacement department/team must be same-org.
+      for (const denial of [
+        departmentId != null ? await assertDepartmentSameOrg(departmentId, orgId) : null,
+        teamId != null ? await assertTeamSameOrg(teamId, orgId) : null,
+      ]) {
+        if (denial) {
+          return NextResponse.json(
+            { error: { code: denial.code, message: denial.message } },
+            { status: denial.status },
+          );
+        }
+      }
 
       const updateData: Record<string, unknown> = { updatedAt: new Date() };
       if (firstName !== undefined) updateData.firstName = firstName;
