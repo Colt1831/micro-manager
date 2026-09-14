@@ -124,7 +124,9 @@ jobs:
   deploy:
     name: Deploy to Render
     needs: [quality, e2e]
-    if: github.ref == 'refs/heads/main'
+    # Job-level variable gate avoids allocating a runner when Render is not configured.
+    # Set RENDER_DEPLOY_ENABLED=true alongside the webhook secret to enable deploys.
+    if: github.ref == 'refs/heads/main' && vars.RENDER_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy via webhook
