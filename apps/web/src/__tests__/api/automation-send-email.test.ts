@@ -4,9 +4,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // vi.hoisted — runs BEFORE the vi.mock factories.
 // ──────────────────────────────────────────────────────────────
 
-const { mockSendEmail, mockRender } = vi.hoisted(() => ({
+const { mockSendEmail, mockRender, mockDbSelect, mockDb } = vi.hoisted(() => ({
   mockSendEmail: vi.fn().mockResolvedValue({ id: 'email-1' }),
   mockRender: vi.fn().mockResolvedValue('<html><body>Test email</body></html>'),
+  mockDbSelect: vi.fn(),
+  mockDb: vi.fn(),
 }));
 
 // ──────────────────────────────────────────────────────────────
@@ -25,20 +27,25 @@ vi.mock('@/lib/email/components', () => ({
   AutomationTriggeredEmail: vi.fn(() => null),
 }));
 
-// Mock the database for user email lookups
-const mockDbSelect = vi.fn();
-const mockDb = vi.fn(() => ({
-  select: mockDbSelect,
-}));
-
-vi.mock('@workmanagement/database', () => ({
-  getDb: mockDb,
+// actions.ts now resolves users via db() from @/lib/api/db (org-scoped lookups).
+vi.mock('@/lib/api/db', () => ({
+  db: mockDb,
   schema: {
     users: {
       id: 'users.id',
       email: 'users.email',
+      organizationId: 'users.organizationId',
+      isActive: 'users.isActive',
+      deletedAt: 'users.deletedAt',
     },
   },
+}));
+
+// The shared task-mutation service isn't exercised by send_email; stub it so the
+// static import doesn't pull the whole mutation graph into this focused test.
+vi.mock('@/lib/tasks/mutate', () => ({
+  mutateTask: vi.fn().mockResolvedValue({ ok: true, task: {} }),
+  SYSTEM_SCOPE: { rank: 'super_admin', level: 100, departmentId: null, seeAllDepartments: true },
 }));
 
 // ──────────────────────────────────────────────────────────────
@@ -84,6 +91,7 @@ function buildDbChain(resolveValue: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDb.mockImplementation(() => ({ select: mockDbSelect }));
 });
 
 describe('executeAction — send_email', () => {
