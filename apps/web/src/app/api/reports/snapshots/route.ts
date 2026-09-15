@@ -70,13 +70,24 @@ export const POST = withAuth(
       // ── Gather snapshot data using shared library ─────────
       const { snapshotData, summary } = await generateEODSnapshotData(orgId!, user.id);
 
-      // ── Store immutable snapshot ──────────────────────────
-      const snapshot = await storeEODSnapshot({
+      // ── Generate AI summary BEFORE insert so the stored row is immutable ──
+      // (no post-insert mutation). On AI failure we store without a summary and
+      // never mutate the snapshot later.
+      let aiSummary: string | null = null;
+      try {
+        aiSummary = await generateEODAISummary(orgId, summary);
+      } catch {
+        // Non-critical — snapshot stored without an AI summary.
+      }
+      const summaryWithAI = { ...summary, aiSummary };
+
+      // ── Store immutable snapshot (idempotent for eod) ─────
+      const { snapshot } = await storeEODSnapshot({
         organizationId: orgId!,
         snapshotType,
         label: label ?? null,
         snapshotData,
-        summary,
+        summary: summaryWithAI,
         generatedBy: user.id,
       });
 
@@ -86,25 +97,6 @@ export const POST = withAuth(
           { status: 500 },
         );
       }
-
-      // ── Fire-and-forget: generate AI summary ────────────────
-      // Runs in the background so the response is not blocked.
-      // The client-side EODReportWidget also generates AI summaries
-      // via useAIEODSummary, so this is a bonus pre-population.
-      generateEODAISummary(orgId, summary).then(async (aiSummary) => {
-        if (!aiSummary) return;
-        try {
-          const updatedSummary = { ...summary, aiSummary };
-          await db()
-            .update(schema.reportSnapshots)
-            .set({ summary: updatedSummary as unknown as Record<string, unknown> })
-            .where(eq(schema.reportSnapshots.id, snapshot.id));
-        } catch {
-          // Non-critical — snapshot already stored
-        }
-      }).catch(() => {
-        // AI summary generation failure is non-critical
-      });
 
       // Audit log
       await createAuditEntry({

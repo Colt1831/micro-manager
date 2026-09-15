@@ -52,7 +52,8 @@ export const POST = withAuth(
         completionRate: (currentSummary?.completionRate as number) ?? 0,
       };
 
-      // ── Generate AI summary ─────────────────────────────
+      // ── Generate AI summary (generate-on-read; the snapshot is IMMUTABLE
+      // so we never persist back to the stored row) ──────────
       const aiSummary = await generateEODAISummary(orgId, storedSummary);
 
       if (!aiSummary) {
@@ -68,17 +69,13 @@ export const POST = withAuth(
         );
       }
 
-      // ── Persist back to the snapshot ────────────────────
-      const updatedSummary = { ...currentSummary, aiSummary };
-
-      await db()
-        .update(schema.reportSnapshots)
-        .set({ summary: updatedSummary as unknown as Record<string, unknown> })
-        .where(eq(schema.reportSnapshots.id, id));
+      // Return the freshly-generated summary WITHOUT mutating the immutable
+      // snapshot. Clients render this transient result.
+      const generatedSummary = { ...currentSummary, aiSummary };
 
       return NextResponse.json({
         message: 'AI summary generated',
-        summary: updatedSummary,
+        summary: generatedSummary,
       });
     } catch (error) {
       const { error: err, status } = handleApiError(

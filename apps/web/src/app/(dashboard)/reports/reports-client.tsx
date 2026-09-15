@@ -314,7 +314,7 @@ export function ReportsClient({ initialMetrics, initialSnapshots }: ReportsClien
       );
       toast({
         title: 'AI summary generated',
-        description: 'The AI-powered summary has been saved to this snapshot.',
+        description: 'AI summary generated for this snapshot.',
       });
     } catch (err) {
       toast({

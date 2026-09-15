@@ -70,12 +70,13 @@ export async function getDbModel(
   orgId: string | null,
   config?: AIConfig,
 ) {
-  const cfg = config ?? getAIConfig();
-
-  // Try to get API key from DB settings
+  // When config is explicitly supplied, honor it verbatim. Otherwise resolve the
+  // org-saved provider + model + key TOGETHER (a saved provider/model must not be
+  // ignored in favor of the env default), falling back to env per provider.
+  let cfg = config ?? getAIConfig();
   let apiKey: string | null = null;
 
-  if (orgId) {
+  if (!config && orgId) {
     try {
       const db = getDb();
       const [org] = await db
@@ -84,17 +85,43 @@ export async function getDbModel(
         .where(eq(schema.organizations.id, orgId))
         .limit(1);
 
-      if (org?.settings) {
-        const aiSettings = (org.settings as Record<string, unknown>)?.ai as
-          | Record<string, unknown>
-          | undefined;
+      const aiSettings = (org?.settings as Record<string, unknown> | undefined)?.ai as
+        | Record<string, unknown>
+        | undefined;
 
-        if (aiSettings?.encryptedKey) {
+      if (aiSettings) {
+        const savedProvider = aiSettings.provider;
+        if (savedProvider === 'openai' || savedProvider === 'anthropic') {
+          const savedModel =
+            typeof aiSettings.model === 'string' && aiSettings.model
+              ? aiSettings.model
+              : DEFAULT_CONFIGS[savedProvider].model;
+          cfg = { provider: savedProvider, model: savedModel };
+        }
+        if (aiSettings.encryptedKey) {
           apiKey = decrypt(aiSettings.encryptedKey as string);
         }
       }
     } catch {
-      // Fall through to env var fallback
+      // Fall through to env-var fallback with the default cfg.
+    }
+  } else if (orgId) {
+    // config was supplied explicitly — still allow the org key to back it.
+    try {
+      const db = getDb();
+      const [org] = await db
+        .select({ settings: schema.organizations.settings })
+        .from(schema.organizations)
+        .where(eq(schema.organizations.id, orgId))
+        .limit(1);
+      const aiSettings = (org?.settings as Record<string, unknown> | undefined)?.ai as
+        | Record<string, unknown>
+        | undefined;
+      if (aiSettings?.encryptedKey) {
+        apiKey = decrypt(aiSettings.encryptedKey as string);
+      }
+    } catch {
+      // ignore
     }
   }
 

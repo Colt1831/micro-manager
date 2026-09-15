@@ -233,6 +233,13 @@ export async function generateEODSnapshotData(
 
 /**
  * Store a generated EOD snapshot in the database.
+ *
+ * Idempotent for `eod` snapshots: a partial unique index on
+ * (organization_id, snapshot_date) WHERE snapshot_type='eod' guarantees at most
+ * one EOD snapshot per org per day, so concurrent cron/manual generation can't
+ * duplicate. Returns `{ snapshot, created }` — `created:false` means an EOD
+ * snapshot already existed and is returned unchanged (callers skip notifications).
+ * Non-eod types always insert (created:true).
  */
 export async function storeEODSnapshot(params: {
   organizationId: string;
@@ -241,21 +248,47 @@ export async function storeEODSnapshot(params: {
   snapshotData: SnapshotData;
   summary: SnapshotSummary & { aiSummary?: string | null };
   generatedBy: string;
-}) {
+}): Promise<{ snapshot: typeof schema.reportSnapshots.$inferSelect | undefined; created: boolean }> {
   const dateStr = new Date().toISOString().split('T')[0]!;
+  const snapshotType = params.snapshotType ?? 'eod';
 
-  const [snapshot] = await db()
+  const values = {
+    organizationId: params.organizationId,
+    snapshotDate: dateStr,
+    snapshotType,
+    label: params.label ?? null,
+    snapshotData: params.snapshotData as unknown as Record<string, unknown>,
+    summary: params.summary as unknown as Record<string, unknown>,
+    generatedBy: params.generatedBy,
+  };
+
+  // Non-eod types are not covered by the unique index — insert directly.
+  if (snapshotType !== 'eod') {
+    const [snapshot] = await db().insert(schema.reportSnapshots).values(values).returning();
+    return { snapshot, created: true };
+  }
+
+  // EOD: race-safe insert. onConflictDoNothing returns [] when a row already
+  // exists for this org/day; fetch and return the existing (immutable) row.
+  const [inserted] = await db()
     .insert(schema.reportSnapshots)
-    .values({
-      organizationId: params.organizationId,
-      snapshotDate: dateStr,
-      snapshotType: params.snapshotType ?? 'eod',
-      label: params.label ?? null,
-      snapshotData: params.snapshotData as unknown as Record<string, unknown>,
-      summary: params.summary as unknown as Record<string, unknown>,
-      generatedBy: params.generatedBy,
-    })
+    .values(values)
+    .onConflictDoNothing()
     .returning();
 
-  return snapshot;
+  if (inserted) return { snapshot: inserted, created: true };
+
+  const [existing] = await db()
+    .select()
+    .from(schema.reportSnapshots)
+    .where(
+      and(
+        eq(schema.reportSnapshots.organizationId, params.organizationId),
+        eq(schema.reportSnapshots.snapshotDate, dateStr),
+        eq(schema.reportSnapshots.snapshotType, 'eod'),
+      ),
+    )
+    .limit(1);
+
+  return { snapshot: existing, created: false };
 }
