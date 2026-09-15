@@ -1,5 +1,5 @@
 # ─── Builder Stage ─────────────────────────────────────────────
-FROM node:24-alpine AS builder
+FROM node:26-alpine AS builder
 
 # Upgrade corepack to support pnpm@10 signature verification
 RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@10 --activate
@@ -28,7 +28,7 @@ ARG NEXT_PUBLIC_APP_URL
 RUN if [ -n "${NEXT_PUBLIC_APP_URL}" ]; then export NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL}"; fi && pnpm --filter @workmanagement/web build
 
 # ─── Runner Stage ─────────────────────────────────────────────
-FROM node:24-alpine AS runner
+FROM node:26-alpine AS runner
 
 # Create non-root user
 RUN addgroup --system app && adduser --system --ingroup app app
