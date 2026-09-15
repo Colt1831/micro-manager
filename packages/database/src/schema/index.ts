@@ -307,6 +307,7 @@ export * from './automation';
 export * from './saved-searches';
 export * from './leave';
 export * from './slack';
+export * from './shifts';
 
 // ─── Import domain tables for relations ──────────────────────
 

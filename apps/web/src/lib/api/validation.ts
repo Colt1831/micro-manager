@@ -317,8 +317,16 @@ export const TimeEntryCreateSchema = z
     entryType: z.enum(['timer', 'manual']).optional().default('manual'),
     durationMinutes: z.number().int().positive('Duration must be positive').optional().nullable(),
     description: z.string().max(1000, 'Description too long').optional().nullable(),
+    // Manual entries may supply an explicit window. Timer entries ignore these
+    // (server now() is authoritative). Coerced to Date; end must be >= start.
+    startTime: z.coerce.date().optional(),
+    endTime: z.coerce.date().optional(),
   })
-  .strict('Unexpected fields in time entry');
+  .strict('Unexpected fields in time entry')
+  .refine((d) => !(d.startTime && d.endTime) || d.endTime >= d.startTime, {
+    message: 'endTime must be on or after startTime',
+    path: ['endTime'],
+  });
 
 // ─── Time Correction Schemas ────────────────────────────────
 

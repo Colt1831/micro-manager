@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 import { db, schema, handleApiError } from '@/lib/api/db';
 import { withAuth } from '@/lib/auth/api-auth';
 import { eq, and, isNull } from 'drizzle-orm';
-
 export const runtime = 'nodejs';
 
 // ─── GET /api/time-entries/running — Check if user has a running timer ──
@@ -31,6 +30,8 @@ export const GET = withAuth(
           and(
             eq(schema.timeEntries.userId, user.id),
             isNull(schema.timeEntries.endTime),
+            // Match the partial unique index: only timer entries are "running".
+            eq(schema.timeEntries.entryType, 'timer'),
           ),
         )
         .limit(1);
