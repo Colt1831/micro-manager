@@ -36,6 +36,7 @@ import {
   useTimeEntries,
   useRunningTimer,
   useTaskSearch,
+  useCurrentShift,
   type TimeEntry,
 } from '@/hooks/use-time-tracking';
 import { useToast } from '@/hooks/use-toast';
@@ -243,18 +244,29 @@ function TimelineBar({
               onMouseEnter={() => setHoveredEntry(entry.id)}
               onMouseLeave={() => setHoveredEntry(null)}
             >
-              {/* Resize handle */}
-              <div
-                className="absolute right-0 top-0 z-10 h-full w-2 cursor-col-resize opacity-0 transition-opacity group-hover:opacity-100 hover:!opacity-100"
-                style={{ backgroundColor: 'rgba(255,255,255,0.3)' }}
-                onMouseDown={(e) =>
-                  handleMouseDown(e, entry.id, entry.durationMinutes ?? 1)
-                }
-              >
-                <div className="absolute inset-y-0 right-0 flex items-center justify-center">
-                  <GripHorizontal className="h-2.5 w-2.5 text-white/60" />
+              {/* Resize handle — manual entries only. Timer entries are
+                  non-editable (Phase 5); their duration PATCH returns 422
+                  CORRECTION_REQUIRED, so we disable the handle and explain. */}
+              {entry.entryType === 'timer' ? (
+                <div
+                  className="absolute right-0 top-0 z-10 flex h-full w-2 items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+                  title="Timer durations can't be dragged — submit a time-correction request to change them."
+                >
+                  <Ban className="h-2.5 w-2.5 text-white/60" />
                 </div>
-              </div>
+              ) : (
+                <div
+                  className="absolute right-0 top-0 z-10 h-full w-2 cursor-col-resize opacity-0 transition-opacity group-hover:opacity-100 hover:!opacity-100"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.3)' }}
+                  onMouseDown={(e) =>
+                    handleMouseDown(e, entry.id, entry.durationMinutes ?? 1)
+                  }
+                >
+                  <div className="absolute inset-y-0 right-0 flex items-center justify-center">
+                    <GripHorizontal className="h-2.5 w-2.5 text-white/60" />
+                  </div>
+                </div>
+              )}
               {/* Tooltip on hover */}
               <AnimatePresence>
                 {isHovered && !isDraggingThis && (
@@ -304,6 +316,14 @@ export default function TimeTrackingPage() {
   const timeData = useTimeEntries(scope);
   const timer = useRunningTimer();
   const taskSearch = useTaskSearch();
+  const {
+    shift,
+    shiftOpen,
+    shiftLoading,
+    clockIn,
+    clockOut,
+    refresh: refreshShift,
+  } = useCurrentShift();
 
   // Manual log dialog
   const [logDialogOpen, setLogDialogOpen] = useState(false);
@@ -355,7 +375,8 @@ export default function TimeTrackingPage() {
   const refresh = useCallback(() => {
     refreshEntries();
     refreshTimer();
-  }, [refreshEntries, refreshTimer]);
+    refreshShift();
+  }, [refreshEntries, refreshTimer, refreshShift]);
   const [searchOpen, setSearchOpen] = useState(false);
 
   // ── Idle detection ───────────────────────────────────────
@@ -451,6 +472,45 @@ export default function TimeTrackingPage() {
     await stopTimer(runningTimer.entry.id, runningTimer.entry.taskId);
     refresh();
   }, [runningTimer, stopTimer, refresh]);
+
+  // ── Shift clock in/out ─────────────────────────────────
+  const handleClockIn = useCallback(async () => {
+    const ok = await clockIn();
+    if (ok) {
+      toast({ title: 'Clocked in', description: 'Your shift is now open.' });
+    } else {
+      toast({ title: 'Failed to clock in', variant: 'error' });
+    }
+  }, [clockIn, toast]);
+
+  const handleClockOut = useCallback(async () => {
+    const ok = await clockOut();
+    if (ok) {
+      // Clock-out auto-stops a running timer server-side; refresh everything.
+      refresh();
+      toast({ title: 'Clocked out', description: 'Your shift is closed. Any running timer was stopped.' });
+    } else {
+      toast({ title: 'Failed to clock out', variant: 'error' });
+    }
+  }, [clockOut, refresh, toast]);
+
+  // Block starting a task timer without an open shift (the POST returns 422
+  // NO_OPEN_SHIFT). Surface a clear "Clock in first" message instead.
+  const handleStartTimer = useCallback(
+    (taskId: string) => {
+      if (!shiftOpen) {
+        toast({
+          title: 'Clock in first',
+          description: 'Open a shift before starting a task timer.',
+          variant: 'error',
+        });
+        return false;
+      }
+      startTimer(taskId);
+      return true;
+    },
+    [shiftOpen, startTimer, toast],
+  );
 
   // ── Resize time entry (drag-to-resize) ──────────────────
   const handleResizeEntry = useCallback(
@@ -770,6 +830,44 @@ export default function TimeTrackingPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Shift clock in/out — a task timer can't start without an open shift */}
+          {shiftOpen ? (
+            <div className="flex items-center gap-2">
+              <Badge variant="success" size="sm" className="flex items-center gap-1">
+                <Clock className="h-2.5 w-2.5" />
+                On shift{shift?.clockIn ? ` since ${formatTime(shift.clockIn)}` : ''}
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClockOut}
+                disabled={shiftLoading}
+                className="h-8 rounded-lg px-2.5 text-xs"
+              >
+                {shiftLoading ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Square className="mr-1 h-3.5 w-3.5" />
+                )}
+                Clock Out
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClockIn}
+              disabled={shiftLoading}
+              className="h-8 rounded-lg px-2.5 text-xs"
+            >
+              {shiftLoading ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Clock className="mr-1 h-3.5 w-3.5" />
+              )}
+              Clock In
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -781,7 +879,17 @@ export default function TimeTrackingPage() {
           </Button>
           <Button
             size="sm"
-            onClick={() => setSearchOpen(true)}
+            onClick={() => {
+              if (!shiftOpen) {
+                toast({
+                  title: 'Clock in first',
+                  description: 'Open a shift before starting a task timer.',
+                  variant: 'error',
+                });
+                return;
+              }
+              setSearchOpen(true);
+            }}
             className="h-8 rounded-lg px-2.5 text-xs"
           >
             <Play className="mr-1 h-3.5 w-3.5" />
@@ -1098,7 +1206,17 @@ export default function TimeTrackingPage() {
                   Tracking your time helps you understand where your hours go. Start a timer when you begin working, or log time manually afterward.
                 </p>
                 <div className="mt-6 flex items-center gap-3">
-                  <Button size="sm" onClick={() => setSearchOpen(true)} className="h-8 rounded-lg px-3 text-xs">
+                  <Button size="sm" onClick={() => {
+                    if (!shiftOpen) {
+                      toast({
+                        title: 'Clock in first',
+                        description: 'Open a shift before starting a task timer.',
+                        variant: 'error',
+                      });
+                      return;
+                    }
+                    setSearchOpen(true);
+                  }} className="h-8 rounded-lg px-3 text-xs">
                     <Play className="mr-1.5 h-3.5 w-3.5" />
                     Start Timer
                   </Button>
@@ -1317,7 +1435,7 @@ export default function TimeTrackingPage() {
                     <button
                       key={task.id}
                       onClick={() => {
-                        startTimer(task.id);
+                        handleStartTimer(task.id);
                         setSearchOpen(false);
                         clearSearch();
                       }}

@@ -178,6 +178,80 @@ export function useRunningTimer() {
   return { runningTimer, timerElapsed, timerLoading, startTimer, stopTimer, refresh };
 }
 
+// ─── Hook: Current shift (clock in/out) ────────────────────
+
+export type CurrentShift = {
+  id: string;
+  userId: string;
+  clockIn: string;
+  clockOut: string | null;
+  source: string;
+};
+
+export function useCurrentShift() {
+  const [shift, setShift] = useState<CurrentShift | null>(null);
+  const [shiftOpen, setShiftOpen] = useState(false);
+  const [shiftLoading, setShiftLoading] = useState(false);
+  const [shiftError, setShiftError] = useState<string | null>(null);
+
+  const loadShift = useCallback(async () => {
+    try {
+      const res = await fetch('/api/shifts/current');
+      if (res.ok) {
+        const data = await res.json();
+        setShiftOpen(!!data.open);
+        setShift(data.shift ?? null);
+      }
+    } catch {
+      // Silently fail — surfaced via explicit clock-in/out actions.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadShift();
+  }, [loadShift]);
+
+  const clockIn = useCallback(async () => {
+    setShiftLoading(true);
+    setShiftError(null);
+    try {
+      const res = await fetch('/api/shifts/current', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error?.message ?? 'Failed to clock in');
+      }
+      await loadShift();
+      return true;
+    } catch (err) {
+      setShiftError(err instanceof Error ? err.message : 'Failed to clock in');
+      return false;
+    } finally {
+      setShiftLoading(false);
+    }
+  }, [loadShift]);
+
+  const clockOut = useCallback(async () => {
+    setShiftLoading(true);
+    setShiftError(null);
+    try {
+      const res = await fetch('/api/shifts/current', { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error?.message ?? 'Failed to clock out');
+      }
+      await loadShift();
+      return true;
+    } catch (err) {
+      setShiftError(err instanceof Error ? err.message : 'Failed to clock out');
+      return false;
+    } finally {
+      setShiftLoading(false);
+    }
+  }, [loadShift]);
+
+  return { shift, shiftOpen, shiftLoading, shiftError, clockIn, clockOut, refresh: loadShift };
+}
+
 // ─── Hook: Task search with debounce ───────────────────────
 
 export function useTaskSearch() {
