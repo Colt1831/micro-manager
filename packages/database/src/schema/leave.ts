@@ -6,6 +6,7 @@ import {
   timestamp,
   boolean,
   integer,
+  numeric,
   date,
   index,
   uniqueIndex,
@@ -63,9 +64,19 @@ export const leaveBalances = pgTable(
       .notNull()
       .references(() => leaveTypes.id, { onDelete: 'cascade' }),
     year: integer('year').notNull(),
-    allocatedDays: integer('allocated_days').notNull().default(0),
-    usedDays: integer('used_days').notNull().default(0),
-    pendingDays: integer('pending_days').notNull().default(0),
+    // numeric (not integer): the system moves half-day (0.5) increments through
+    // these columns; an integer column silently truncated them (Phase 5). mode
+    // 'number' maps pg's string-typed numeric back to a JS number at the driver
+    // boundary, so callers never see a '0.5' string and never string-concat.
+    allocatedDays: numeric('allocated_days', { precision: 6, scale: 1, mode: 'number' })
+      .notNull()
+      .default(0),
+    usedDays: numeric('used_days', { precision: 6, scale: 1, mode: 'number' })
+      .notNull()
+      .default(0),
+    pendingDays: numeric('pending_days', { precision: 6, scale: 1, mode: 'number' })
+      .notNull()
+      .default(0),
     notes: text('notes'),
     createdBy: text('created_by').references(() => users.id),
     updatedBy: text('updated_by').references(() => users.id),
@@ -106,7 +117,8 @@ export const leaveRequests = pgTable(
     startDate: date('start_date').notNull(),
     endDate: date('end_date').notNull(),
     isHalfDay: boolean('is_half_day').default(false),
-    daysCount: integer('days_count').notNull(),
+    // numeric (not integer): the API writes 0.5 for half-days — integer rounded.
+    daysCount: numeric('days_count', { precision: 5, scale: 1, mode: 'number' }).notNull(),
     reason: text('reason').notNull(),
     status: varchar('status', { length: 20 }).notNull().default('pending'),
     reviewedBy: text('reviewed_by').references(() => users.id),

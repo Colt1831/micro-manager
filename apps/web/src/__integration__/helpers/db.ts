@@ -27,7 +27,7 @@ export function testDb(): TestDb {
  */
 export async function resetDb(): Promise<void> {
   await testDb().execute(
-    sql`TRUNCATE TABLE organizations, users, tasks, time_entries, task_dependencies, shifts RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE organizations, users, tasks, time_entries, task_dependencies, shifts, leave_types, leave_balances, leave_requests RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -150,10 +150,20 @@ export async function insertShift(
 
 // ─── Leave fixtures ─────────────────────────────────────────
 
-export async function insertLeaveType(organizationId: string, name = 'Annual'): Promise<string> {
+export async function insertLeaveType(
+  organizationId: string,
+  name = 'Annual',
+  opts: { isActive?: boolean; sortOrder?: number } = {},
+): Promise<string> {
   const [row] = await testDb()
     .insert(schema.leaveTypes)
-    .values({ organizationId, name, slug: `lt-${randomUUID().slice(0, 8)}` })
+    .values({
+      organizationId,
+      name,
+      slug: `lt-${randomUUID().slice(0, 8)}`,
+      isActive: opts.isActive ?? true,
+      sortOrder: opts.sortOrder ?? 0,
+    })
     .returning({ id: schema.leaveTypes.id });
   return row!.id;
 }

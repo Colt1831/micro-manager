@@ -2,20 +2,25 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getDb, schema } from '@workmanagement/database';
 import { withAuth, checkPermission } from '@/lib/auth/api-auth';
-import { eq, desc, and, lte, gte, ne, or } from 'drizzle-orm';
+import { eq, desc, and, lte, gte, ne, or, sql } from 'drizzle-orm';
 import { handleApiError } from '@/lib/api/db';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
 
-const RequestCreateSchema = z.object({
-  leaveTypeId: z.string().uuid(),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  isHalfDay: z.boolean().optional().default(false),
-  reason: z.string().min(1).max(1000),
-  attachmentUrl: z.string().url().optional().nullable(),
-});
+const RequestCreateSchema = z
+  .object({
+    leaveTypeId: z.string().uuid(),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    isHalfDay: z.boolean().optional().default(false),
+    reason: z.string().min(1).max(1000),
+    attachmentUrl: z.string().url().optional().nullable(),
+  })
+  .refine((d) => new Date(d.endDate) >= new Date(d.startDate), {
+    message: 'End date must be on or after start date',
+    path: ['endDate'],
+  });
 
 const RequestFilterSchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
@@ -142,9 +147,31 @@ export const POST = withAuth(
       const { leaveTypeId, startDate, endDate, isHalfDay, reason, attachmentUrl } = parsed.data;
       const daysCount = isHalfDay ? 0.5 : calculateDays(startDate, endDate);
 
+      const db = getDb();
+
+      // Leave type must belong to THIS org and be active — otherwise a user
+      // could submit against an archived or cross-org type.
+      const [leaveType] = await db
+        .select({ id: schema.leaveTypes.id })
+        .from(schema.leaveTypes)
+        .where(
+          and(
+            eq(schema.leaveTypes.id, leaveTypeId),
+            eq(schema.leaveTypes.organizationId, orgId!),
+            eq(schema.leaveTypes.isActive, true),
+          ),
+        )
+        .limit(1);
+
+      if (!leaveType) {
+        return NextResponse.json(
+          { error: { code: 'INVALID_LEAVE_TYPE', message: 'Leave type not found or inactive' } },
+          { status: 400 },
+        );
+      }
+
       // Check for overlapping requests — new range overlaps existing if:
       // newStart <= existingEnd AND newEnd >= existingStart
-      const db = getDb();
       const newStart = new Date(startDate).toISOString().split('T')[0]!;
       const newEnd = new Date(endDate).toISOString().split('T')[0]!;
 
@@ -204,7 +231,7 @@ export const POST = withAuth(
         await db
           .update(schema.leaveBalances)
           .set({
-            pendingDays: existing[0]!.pendingDays + daysCount,
+            pendingDays: sql`${schema.leaveBalances.pendingDays} + ${daysCount}`,
             updatedAt: new Date(),
           })
           .where(eq(schema.leaveBalances.id, existing[0]!.id));
