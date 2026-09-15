@@ -139,7 +139,69 @@ export async function removeTaskFromIndex(taskId: string): Promise<void> {
   }
 }
 
-// ─── Search Tasks ──────────────────────────────────────────────
+// ─── Stale-doc purge (per-org, multi-tenant safe) ──────────────
+
+/**
+ * Return the IDs of all documents currently indexed for one organization in the
+ * given index. Pages through Meilisearch with the org filter so we never touch
+ * another tenant's docs. Used by the reindex sweep to diff against live DB rows.
+ */
+async function getIndexedDocIds(indexName: string, organizationId: string): Promise<string[]> {
+  const client = getSearchClient();
+  const index = client.index(indexName);
+  const ids: string[] = [];
+  const pageSize = 1000;
+  let offset = 0;
+
+  // getDocuments supports a filter; page until we've drained the org's docs.
+  for (;;) {
+    const res = await index.getDocuments({
+      fields: ['id'],
+      filter: `organizationId = ${organizationId}`,
+      limit: pageSize,
+      offset,
+    });
+    const batch = (res.results ?? []) as Array<{ id: string }>;
+    for (const d of batch) ids.push(d.id);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+  return ids;
+}
+
+/**
+ * Delete documents that are indexed for an org but no longer active in the DB.
+ * `activeIds` are the live DB IDs for that org; anything indexed for the org and
+ * NOT in that set is removed. Scoped by org filter — never deletes cross-org
+ * (no global deleteAllDocuments). Returns the count removed.
+ */
+export async function purgeStaleTasks(
+  organizationId: string,
+  activeIds: string[],
+): Promise<number> {
+  return purgeStale(INDEXES.TASKS, organizationId, activeIds);
+}
+
+export async function purgeStaleProjects(
+  organizationId: string,
+  activeIds: string[],
+): Promise<number> {
+  return purgeStale(INDEXES.PROJECTS, organizationId, activeIds);
+}
+
+async function purgeStale(
+  indexName: string,
+  organizationId: string,
+  activeIds: string[],
+): Promise<number> {
+  const indexed = await getIndexedDocIds(indexName, organizationId);
+  const activeSet = new Set(activeIds);
+  const stale = indexed.filter((id) => !activeSet.has(id));
+  if (stale.length === 0) return 0;
+  const client = getSearchClient();
+  await client.index(indexName).deleteDocuments(stale);
+  return stale.length;
+}
 
 export interface SearchOptions {
   query: string;

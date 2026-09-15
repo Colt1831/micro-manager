@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { db, schema, handleApiError } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { eq, and, isNull } from 'drizzle-orm';
-import { testSlackWebhook } from '@/lib/slack/webhook';
+import { testSlackWebhook, encryptWebhookUrl } from '@/lib/slack/webhook';
 
 export const runtime = 'nodejs';
 
@@ -81,12 +81,17 @@ export const POST = withAuth(
         )
         .limit(1);
 
+      // Encrypt at rest. Fails CLOSED if ENCRYPTION_KEY is missing (never
+      // stores plaintext). Opportunistically re-encrypts any legacy plaintext
+      // row since we always write the encrypted form here.
+      const encryptedUrl = encryptWebhookUrl(webhookUrl);
+
       let integration;
       if (existing) {
         // Update
         [integration] = await db()
           .update(schema.slackIntegrations)
-          .set({ webhookUrl, updatedAt: new Date() })
+          .set({ webhookUrl: encryptedUrl, updatedAt: new Date() })
           .where(eq(schema.slackIntegrations.id, existing.id))
           .returning();
       } else {
@@ -95,7 +100,7 @@ export const POST = withAuth(
           .insert(schema.slackIntegrations)
           .values({
             organizationId: orgId!,
-            webhookUrl,
+            webhookUrl: encryptedUrl,
             createdBy: user.id,
           })
           .returning();
