@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
-import { withAuth } from '@/lib/auth/api-auth';
+import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { eq, and, isNull, isNotNull, sql, gte, type SQL } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
@@ -9,8 +9,12 @@ export const runtime = 'nodejs';
 // ─── GET /api/reports/time — Time tracking report data ──────────
 
 export const GET = withAuth(
-  async (request: NextRequest, { user: _user, orgId, scope }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
+      // Viewing time reports requires the report:view permission. Department
+      // scope is additionally applied below via applyDeptScope.
+      await requirePermission(user.id, 'report:view');
+
       const { searchParams } = request.nextUrl;
       const period = searchParams.get('period') ?? 'week'; // week | month | quarter
 

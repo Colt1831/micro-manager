@@ -27,7 +27,7 @@ export function testDb(): TestDb {
  */
 export async function resetDb(): Promise<void> {
   await testDb().execute(
-    sql`TRUNCATE TABLE organizations, users, tasks, time_entries, task_dependencies RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE organizations, users, tasks, time_entries, task_dependencies, shifts RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -125,6 +125,27 @@ export async function seedBase(): Promise<{ orgId: string; userId: string; taskI
   const userId = await insertUser();
   const taskId = await insertTask(orgId, userId);
   return { orgId, userId, taskId };
+}
+
+// ─── Shift fixtures (Phase 4) ───────────────────────────────
+
+/** Open a shift for a user (clockOut null = open). */
+export async function insertShift(
+  organizationId: string,
+  userId: string,
+  opts: { clockIn?: Date; clockOut?: Date | null } = {},
+): Promise<string> {
+  const [row] = await testDb()
+    .insert(schema.shifts)
+    .values({
+      organizationId,
+      userId,
+      clockIn: opts.clockIn ?? new Date(),
+      clockOut: opts.clockOut ?? null,
+      source: 'test',
+    })
+    .returning({ id: schema.shifts.id });
+  return row!.id;
 }
 
 // ─── Leave fixtures ─────────────────────────────────────────

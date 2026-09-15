@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, recalcTaskHours } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
-import { eq, desc, and, isNull, isNotNull } from 'drizzle-orm';
+import { eq, desc, and, isNull } from 'drizzle-orm';
 import { TimeEntryCreateSchema, validationError } from '@/lib/api/validation';
 import { getTaskIdFromPath, checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
 import { isUniqueViolation } from '@/lib/db-errors';
@@ -67,7 +67,7 @@ export const POST = withAuth(
         return NextResponse.json(err, { status });
       }
 
-      const { entryType, durationMinutes, description } = parsed.data;
+      const { entryType, durationMinutes, description, startTime, endTime } = parsed.data;
 
       // Verify task exists, belongs to org, and is not read-only
       const [task] = await db()
@@ -98,11 +98,33 @@ export const POST = withAuth(
       }
 
       if (entryType === 'timer') {
-        // Check no other running timer exists for this user
+        // A task timer requires an open shift (attendance envelope + guard).
+        const [openShift] = await db()
+          .select({ id: schema.shifts.id })
+          .from(schema.shifts)
+          .where(and(eq(schema.shifts.userId, user.id), isNull(schema.shifts.clockOut)))
+          .limit(1);
+
+        if (!openShift) {
+          return NextResponse.json(
+            { error: { code: 'NO_OPEN_SHIFT', message: 'Clock in first to start a timer.' } },
+            { status: 422 },
+          );
+        }
+
+        // Check no other running timer exists for this user. Filter entry_type =
+        // 'timer' to match the partial unique index (WHERE end_time IS NULL AND
+        // entry_type = 'timer'); an open manual entry must not count here.
         const [existing] = await db()
           .select({ id: schema.timeEntries.id })
           .from(schema.timeEntries)
-          .where(and(eq(schema.timeEntries.userId, user.id), isNull(schema.timeEntries.endTime)))
+          .where(
+            and(
+              eq(schema.timeEntries.userId, user.id),
+              isNull(schema.timeEntries.endTime),
+              eq(schema.timeEntries.entryType, 'timer'),
+            ),
+          )
           .limit(1);
 
         if (existing) {
@@ -126,8 +148,8 @@ export const POST = withAuth(
           .values({
             taskId,
             userId: user.id,
-            startTime: entryType === 'timer' ? now : body.startTime ? new Date(body.startTime) : now,
-            endTime: entryType === 'timer' ? null : body.startTime ? now : null,
+            startTime: entryType === 'timer' ? now : (startTime ?? now),
+            endTime: entryType === 'timer' ? null : (endTime ?? (startTime ? now : null)),
             durationMinutes: entryType === 'timer' ? null : (durationMinutes ?? null),
             entryType,
             description: description ?? null,
@@ -225,6 +247,7 @@ export const PATCH = withAuth(
           endTime: schema.timeEntries.endTime,
           startTime: schema.timeEntries.startTime,
           durationMinutes: schema.timeEntries.durationMinutes,
+          entryType: schema.timeEntries.entryType,
         })
         .from(schema.timeEntries)
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
@@ -256,6 +279,24 @@ export const PATCH = withAuth(
 
       // If entry is stopped and body has durationMinutes, update the duration (drag-to-resize)
       if (existing.endTime && body.durationMinutes !== undefined) {
+        // Timer-produced entries are the "exact and correct" record — their
+        // duration is not freely editable. A change must go through the
+        // time-correction approval workflow (POST /api/time-corrections).
+        // Manual entries remain directly editable; stopping a running timer and
+        // description edits (handled below) stay allowed.
+        if (existing.entryType === 'timer') {
+          return NextResponse.json(
+            {
+              error: {
+                code: 'CORRECTION_REQUIRED',
+                message:
+                  'Timer durations cannot be edited directly. Submit a time-correction request for approval.',
+              },
+            },
+            { status: 422 },
+          );
+        }
+
         const durationMinutes = Math.max(1, Math.round(Number(body.durationMinutes)));
         if (isNaN(durationMinutes)) {
           return NextResponse.json(
@@ -437,25 +478,3 @@ export const DELETE = withAuth(
   { windowMs: 60_000, max: 60, namespace: 'time-entries:delete' },
 );
 
-// ─── Helper: Recalculate task actual hours ────────────────────
-
-async function recalcTaskHours(taskId: string) {
-  try {
-    const allEntries = await db()
-      .select({ durationMinutes: schema.timeEntries.durationMinutes })
-      .from(schema.timeEntries)
-      .where(
-        and(eq(schema.timeEntries.taskId, taskId), isNotNull(schema.timeEntries.durationMinutes)),
-      );
-
-    const totalMinutes = allEntries.reduce((sum, e) => sum + (e.durationMinutes ?? 0), 0);
-    const totalHours = (totalMinutes / 60).toFixed(2);
-
-    await db()
-      .update(schema.tasks)
-      .set({ actualHours: totalHours, updatedAt: new Date() })
-      .where(eq(schema.tasks.id, taskId));
-  } catch (error) {
-    console.error('Failed to recalculate task hours:', error);
-  }
-}
