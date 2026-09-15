@@ -1,5 +1,5 @@
-import { pgTable, uuid, text, varchar, timestamp, jsonb, date, index } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { pgTable, uuid, text, varchar, timestamp, jsonb, date, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
 import { organizations, users } from './index';
 
 // ─── Report Snapshots ──────────────────────────────────────────
@@ -38,6 +38,11 @@ export const reportSnapshots = pgTable(
     orgIdx: index('idx_report_snapshots_org').on(table.organizationId, table.snapshotDate),
     typeDateIdx: index('idx_report_snapshots_type_date').on(table.snapshotType, table.snapshotDate),
     dateIdx: index('idx_report_snapshots_date').on(table.snapshotDate),
+    // At most one 'eod' snapshot per org per day — makes cron/manual generation
+    // idempotent. Partial so non-eod snapshot types are unaffected.
+    eodUnique: uniqueIndex('idx_report_snapshots_eod_unique')
+      .on(table.organizationId, table.snapshotDate)
+      .where(sql`${table.snapshotType} = 'eod'`),
   }),
 );
 

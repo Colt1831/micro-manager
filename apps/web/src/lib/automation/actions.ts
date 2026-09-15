@@ -1,5 +1,8 @@
 import type { AutomationContext } from './engine';
 import { createElement } from 'react';
+import { db, schema } from '@/lib/api/db';
+import { eq, and, isNull } from 'drizzle-orm';
+import { mutateTask, SYSTEM_SCOPE } from '@/lib/tasks/mutate';
 
 // ─── Action Definitions ────────────────────────────────────
 
@@ -105,16 +108,22 @@ async function executeSendEmail(
     recipients.push(...to);
   }
 
-  // Look up emails from user IDs
+  // Look up emails from user IDs — org-scoped (active, not deleted) so a rule
+  // can't email across tenants.
   if (userIds && userIds.length > 0) {
-    const { getDb, schema } = await import('@workmanagement/database');
     const { inArray } = await import('drizzle-orm');
-    const db = getDb();
 
-    const users = await db
+    const users = await db()
       .select({ email: schema.users.email })
       .from(schema.users)
-      .where(inArray(schema.users.id, userIds));
+      .where(
+        and(
+          inArray(schema.users.id, userIds),
+          eq(schema.users.organizationId, context.organizationId),
+          eq(schema.users.isActive, true),
+          isNull(schema.users.deletedAt),
+        ),
+      );
 
     for (const user of users) {
       if (user.email) recipients.push(user.email);
@@ -124,6 +133,9 @@ async function executeSendEmail(
   if (recipients.length === 0) {
     throw new Error('No recipients specified for email');
   }
+
+  // Dedupe recipients (direct `to` addresses aren't DB-scoped but must dedupe).
+  const uniqueRecipients = Array.from(new Set(recipients));
 
   // Build email link
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
@@ -146,7 +158,7 @@ async function executeSendEmail(
 
   // Send to each recipient individually (BCC would be better but some ESPs
   // require individual sends for deliverability)
-  for (const recipient of recipients) {
+  for (const recipient of uniqueRecipients) {
     try {
       await sendEmail({ to: recipient, subject, html });
     } catch {
@@ -164,10 +176,13 @@ async function executeNotify(
     throw new Error('No user IDs specified for notification');
   }
 
+  // Org-scope the recipients so a rule can't notify across tenants.
+  const orgUserIds = await filterOrgUserIds(context.organizationId, userIds);
+
   // Attempt to notify each user via the notification system
   const { createNotification } = await import('@/lib/notifications');
 
-  for (const userId of userIds) {
+  for (const userId of orgUserIds) {
     try {
       await createNotification({
         organizationId: context.organizationId,
@@ -192,28 +207,48 @@ async function executeChangeStatus(
 ): Promise<void> {
   const { status } = config;
   if (!status) throw new Error('No status specified');
+  await applyTaskMutation(context, { status });
+}
 
+/**
+ * Load the target task (org-scoped, not deleted) and apply a mutation through
+ * the shared task-mutation service so history/audit/search/webhook/notification
+ * side effects fire. `suppressAutomation` prevents automation → automation loops.
+ */
+async function applyTaskMutation(
+  context: AutomationContext,
+  changes: Parameters<typeof mutateTask>[0]['changes'],
+): Promise<void> {
   if (context.entityType !== 'task') {
-    throw new Error(`change_status action not supported for entity type: ${context.entityType}`);
+    throw new Error(`task mutation not supported for entity type: ${context.entityType}`);
   }
 
-  const { getDb, schema } = await import('@workmanagement/database');
-  const { eq, isNull, and } = await import('drizzle-orm');
-
-  const db = getDb();
-  await db
-    .update(schema.tasks)
-    .set({
-      status,
-      updatedAt: new Date(),
-      updatedBy: context.triggeredByUserId,
-    })
+  const [existing] = await db()
+    .select()
+    .from(schema.tasks)
     .where(
       and(
         eq(schema.tasks.id, context.entityId),
+        eq(schema.tasks.organizationId, context.organizationId),
         isNull(schema.tasks.deletedAt),
       ),
-    );
+    )
+    .limit(1);
+
+  if (!existing) throw new Error('Task not found');
+
+  const result = await mutateTask({
+    existing,
+    changes,
+    actorUserId: context.triggeredByUserId ?? existing.createdBy,
+    actorScope: SYSTEM_SCOPE,
+    orgId: context.organizationId,
+    suppressAutomation: true,
+  });
+
+  if (!result.ok) {
+    throw new Error(result.error.message);
+  }
 }
 
 async function executeAssign(
@@ -222,29 +257,7 @@ async function executeAssign(
 ): Promise<void> {
   const { userId } = config;
   if (!userId) throw new Error('No user ID specified for assignment');
-
-  if (context.entityType !== 'task') {
-    throw new Error(`assign action not supported for entity type: ${context.entityType}`);
-  }
-
-  const { getDb, schema } = await import('@workmanagement/database');
-  const { eq, isNull, and } = await import('drizzle-orm');
-
-  const db = getDb();
-  await db
-    .update(schema.tasks)
-    .set({
-      assignedTo: userId,
-      assignedBy: context.triggeredByUserId,
-      updatedAt: new Date(),
-      updatedBy: context.triggeredByUserId,
-    })
-    .where(
-      and(
-        eq(schema.tasks.id, context.entityId),
-        isNull(schema.tasks.deletedAt),
-      ),
-    );
+  await applyTaskMutation(context, { assignedTo: userId });
 }
 
 async function executeAddLabel(
@@ -253,40 +266,28 @@ async function executeAddLabel(
 ): Promise<void> {
   const { label } = config;
   if (!label) throw new Error('No label specified');
-
   if (context.entityType !== 'task') {
     throw new Error(`add_label action not supported for entity type: ${context.entityType}`);
   }
 
-  const { getDb, schema } = await import('@workmanagement/database');
-  const { eq, isNull, and } = await import('drizzle-orm');
-
-  const db = getDb();
-
-  // Get current task to read existing labels
-  const [task] = await db
-    .select({ id: schema.tasks.id, labels: schema.tasks.labels })
+  // Read current labels (org-scoped) to append idempotently.
+  const [task] = await db()
+    .select({ labels: schema.tasks.labels })
     .from(schema.tasks)
     .where(
-      and(eq(schema.tasks.id, context.entityId), isNull(schema.tasks.deletedAt)),
+      and(
+        eq(schema.tasks.id, context.entityId),
+        eq(schema.tasks.organizationId, context.organizationId),
+        isNull(schema.tasks.deletedAt),
+      ),
     )
     .limit(1);
 
   if (!task) throw new Error('Task not found');
-
   const currentLabels: string[] = (task.labels as string[]) ?? [];
   if (currentLabels.includes(label)) return; // Already has the label
 
-  await db
-    .update(schema.tasks)
-    .set({
-      labels: [...currentLabels, label],
-      updatedAt: new Date(),
-      updatedBy: context.triggeredByUserId,
-    })
-    .where(
-      and(eq(schema.tasks.id, context.entityId), isNull(schema.tasks.deletedAt)),
-    );
+  await applyTaskMutation(context, { labels: [...currentLabels, label] });
 }
 
 async function executeChangePriority(
@@ -295,28 +296,7 @@ async function executeChangePriority(
 ): Promise<void> {
   const { priority } = config;
   if (!priority) throw new Error('No priority specified');
-
-  if (context.entityType !== 'task') {
-    throw new Error(`change_priority action not supported for entity type: ${context.entityType}`);
-  }
-
-  const { getDb, schema } = await import('@workmanagement/database');
-  const { eq, isNull, and } = await import('drizzle-orm');
-
-  const db = getDb();
-  await db
-    .update(schema.tasks)
-    .set({
-      priority,
-      updatedAt: new Date(),
-      updatedBy: context.triggeredByUserId,
-    })
-    .where(
-      and(
-        eq(schema.tasks.id, context.entityId),
-        isNull(schema.tasks.deletedAt),
-      ),
-    );
+  await applyTaskMutation(context, { priority });
 }
 
 async function executeEscalate(
@@ -329,29 +309,14 @@ async function executeEscalate(
     throw new Error(`escalate action not supported for entity type: ${context.entityType}`);
   }
 
-  // First, change priority to critical
-  const { getDb, schema } = await import('@workmanagement/database');
-  const { eq, isNull, and } = await import('drizzle-orm');
+  // First, bump priority to critical through the shared service.
+  await applyTaskMutation(context, { priority: 'critical' });
 
-  const db = getDb();
-  await db
-    .update(schema.tasks)
-    .set({
-      priority: 'critical',
-      updatedAt: new Date(),
-      updatedBy: context.triggeredByUserId,
-    })
-    .where(
-      and(
-        eq(schema.tasks.id, context.entityId),
-        isNull(schema.tasks.deletedAt),
-      ),
-    );
-
-  // Notify the escalation recipients
+  // Notify the escalation recipients — org-scoped so cross-org IDs are ignored.
   if (userIds && userIds.length > 0) {
+    const orgUserIds = await filterOrgUserIds(context.organizationId, userIds);
     const { createNotification } = await import('@/lib/notifications');
-    for (const userId of userIds) {
+    for (const userId of orgUserIds) {
       try {
         await createNotification({
           organizationId: context.organizationId,
@@ -368,4 +333,26 @@ async function executeEscalate(
       }
     }
   }
+}
+
+/**
+ * Filter a list of user IDs to only those in the given org (active, not deleted).
+ * Automation recipient lookups must be org-scoped so a rule can't notify or
+ * assign across tenants.
+ */
+async function filterOrgUserIds(organizationId: string, userIds: string[]): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const { inArray } = await import('drizzle-orm');
+  const rows = await db()
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(
+      and(
+        inArray(schema.users.id, userIds),
+        eq(schema.users.organizationId, organizationId),
+        eq(schema.users.isActive, true),
+        isNull(schema.users.deletedAt),
+      ),
+    );
+  return rows.map((r) => r.id);
 }

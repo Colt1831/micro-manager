@@ -68,7 +68,7 @@ export const POST = async (request: NextRequest) => {
       orgId: string;
       orgName: string;
       snapshotId?: string;
-      action: 'generated' | 'skipped_time' | 'no_users' | 'error';
+      action: 'generated' | 'skipped_time' | 'skipped_exists' | 'no_users' | 'error';
       error?: string;
     }> = [];
 
@@ -143,8 +143,8 @@ export const POST = async (request: NextRequest) => {
 
         const extendedSummary = { ...summary, aiSummary };
 
-        // ── Store snapshot ────────────────────────────────────
-        const snapshot = await storeEODSnapshot({
+        // ── Store snapshot (idempotent per org/day) ───────────
+        const { snapshot, created } = await storeEODSnapshot({
           organizationId: org.id,
           snapshotType: 'eod',
           label: `Auto-generated EOD Report - ${dateStr}`,
@@ -152,6 +152,19 @@ export const POST = async (request: NextRequest) => {
           summary: extendedSummary,
           generatedBy: firstUser.id,
         });
+
+        // An EOD snapshot already existed for this org today (concurrent cron or
+        // a manual generation) — treat as idempotent: no duplicate + no re-notify.
+        if (!created) {
+          results.push({
+            orgId: org.id,
+            orgName: org.name,
+            snapshotId: snapshot?.id,
+            action: 'skipped_exists',
+          });
+          skipped++;
+          continue;
+        }
 
         results.push({
           orgId: org.id,

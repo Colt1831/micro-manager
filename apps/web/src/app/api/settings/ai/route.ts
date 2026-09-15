@@ -5,7 +5,8 @@ import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { eq } from 'drizzle-orm';
 import { handleApiError } from '@/lib/api/db';
 import { encrypt } from '@/lib/encryption';
-import { getModel } from '@/lib/ai';
+import { getDbModel, AINotConfiguredError } from '@/lib/ai';
+import { generateText } from 'ai';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
@@ -162,65 +163,50 @@ export const PUT = withAuth(
 );
 
 // ─── POST /api/settings/ai/test ───────────────────────────
-// Test the AI connection with current settings
+// Test the AI connection by making ONE minimal real provider call.
+// Requires settings:manage (spends credits). Rate limited.
 
 export const POST = withAuth(
   async (_request: NextRequest, { user, orgId }) => {
     try {
-      await requirePermission(user.id, 'settings:view');
+      await requirePermission(user.id, 'settings:manage');
 
-      // Get the AI config from org settings (falling back to env vars)
-      const db = getDb();
-      const [org] = await db
-        .select({ settings: schema.organizations.settings })
-        .from(schema.organizations)
-        .where(eq(schema.organizations.id, orgId!))
-        .limit(1);
-
-      if (!org) {
-        return NextResponse.json(
-          { error: { code: 'NOT_FOUND', message: 'Organization not found' } },
-          { status: 404 },
-        );
-      }
-
-      const aiSettings = (org.settings as Record<string, unknown>)?.ai as
-        | Record<string, unknown>
-        | undefined;
-
-      if (!aiSettings) {
-        return NextResponse.json(
-          { success: false, message: 'No AI provider configured. Configure one in Settings > AI.' },
-          { status: 200 },
-        );
-      }
-
-      // Test the connection by attempting to create a model instance
+      // Resolve the org-saved provider/model/key together (getDbModel).
+      let model;
       try {
-        // We can't easily test without making an actual API call,
-        // but we can verify the config is valid
-        const model = getModel({
-          provider: (aiSettings.provider as 'openai' | 'anthropic') ?? 'openai',
-          model: (aiSettings.model as string) ?? 'gpt-4o-mini',
-        });
-
-        if (!model) {
+        model = await getDbModel(orgId!);
+      } catch (err) {
+        if (err instanceof AINotConfiguredError) {
           return NextResponse.json(
-            { success: false, message: 'Invalid model configuration' },
+            { success: false, message: 'No AI provider configured. Configure one in Settings > AI.' },
             { status: 200 },
           );
         }
+        throw err;
+      }
+
+      // ONE minimal real call — tiny prompt, minimal tokens. Sanitize any
+      // failure so we never leak the key or a raw provider error.
+      try {
+        const result = await generateText({
+          model,
+          prompt: 'Reply with the single word: ok',
+          maxOutputTokens: 5,
+          temperature: 0,
+        });
 
         return NextResponse.json({
           success: true,
-          message: `AI provider configured successfully using ${aiSettings.provider}`,
-          provider: aiSettings.provider,
-          model: aiSettings.model,
-          keyConfigured: !!(aiSettings.encryptedKey as string),
+          message: 'AI provider responded successfully.',
+          sample: (result.text ?? '').slice(0, 40),
         });
       } catch {
+        // Never surface the provider's raw error (may echo the key/endpoint).
         return NextResponse.json(
-          { success: false, message: 'Failed to validate AI configuration' },
+          {
+            success: false,
+            message: 'AI provider call failed — check the API key, model, and provider settings.',
+          },
           { status: 200 },
         );
       }

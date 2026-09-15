@@ -7,6 +7,7 @@ import { eq, desc, and, isNull } from 'drizzle-orm';
 import { uploadFile, deleteFile, getPresignedDownloadUrl } from '@/lib/storage';
 import { MAX_FILE_SIZE, ALLOWED_MIME_TYPES, BLOCKED_EXTENSIONS } from '@/lib/api/validation';
 import { getTaskIdFromPath, checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
+import { randomUUID } from 'crypto';
 
 export const runtime = 'nodejs';
 
@@ -93,9 +94,17 @@ export const POST = withAuth(
         );
       }
 
-      // Validate MIME type
-      if (file.type && !ALLOWED_MIME_TYPES.has(file.type)) {
-        console.warn(`Unusual MIME type for upload: ${file.type} (file: ${file.name})`);
+      // Enforce MIME type (trust boundary): reject when missing or not allowed.
+      if (!file.type || !ALLOWED_MIME_TYPES.has(file.type)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: `File type '${file.type || 'unknown'}' is not allowed`,
+            },
+          },
+          { status: 400 },
+        );
       }
 
       // Validate file extension
@@ -132,8 +141,11 @@ export const POST = withAuth(
         );
       }
 
-      // Upload to S3
-      const storageKey = `tasks/${taskId}/${Date.now()}-${file.name}`;
+      // Sanitize the storage key: use only the basename (strip any path
+      // components a crafted filename could include) + a random UUID prefix so
+      // keys are unique and never traversable.
+      const baseName = (file.name.split(/[\\/]/).pop() ?? 'file').replace(/[^\w.\-]/g, '_');
+      const storageKey = `tasks/${taskId}/${randomUUID()}-${baseName}`;
       const buffer = Buffer.from(await file.arrayBuffer());
 
       await uploadFile({
@@ -142,21 +154,30 @@ export const POST = withAuth(
         contentType: file.type || 'application/octet-stream',
       });
 
-      // Store metadata in database
-      const [attachment] = await db()
-        .insert(schema.taskAttachments)
-        .values({
-          taskId,
-          userId: user.id,
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type || null,
-          storageKey,
-          isFinal: true,
-        })
-        .returning();
+      // Store metadata in database. If the insert fails (throws OR returns no
+      // row) AFTER a successful upload, best-effort delete the orphaned object
+      // so it doesn't leak in storage.
+      let attachment;
+      try {
+        [attachment] = await db()
+          .insert(schema.taskAttachments)
+          .values({
+            taskId,
+            userId: user.id,
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType: file.type || null,
+            storageKey,
+            isFinal: true,
+          })
+          .returning();
+      } catch (dbError) {
+        await deleteFile(storageKey).catch(() => {});
+        throw dbError;
+      }
 
       if (!attachment) {
+        await deleteFile(storageKey).catch(() => {});
         return NextResponse.json(
           { error: { code: 'INTERNAL_ERROR', message: 'Failed to record attachment' } },
           { status: 500 },

@@ -7,6 +7,8 @@ import {
   initializeSearchIndexes,
   indexTasks,
   indexProjects,
+  purgeStaleTasks,
+  purgeStaleProjects,
 } from '@/lib/search';
 
 export const runtime = 'nodejs';
@@ -98,6 +100,13 @@ async function reindexHandler(
         await indexTasks(docs);
       }
       result.tasksIndexed = docs.length;
+
+      // Purge tasks indexed for this org that are no longer active in the DB
+      // (deleted/soft-deleted). Org-scoped — never touches other tenants.
+      result.tasksRemoved = await purgeStaleTasks(
+        ctx.orgId,
+        docs.map((d) => d.id),
+      );
     } catch (err) {
       result.errors.push(`Task reindex failed: ${err instanceof Error ? err.message : err}`);
     }
@@ -142,6 +151,12 @@ async function reindexHandler(
         await indexProjects(docs);
       }
       result.projectsIndexed = docs.length;
+
+      // Purge projects indexed for this org no longer active in the DB.
+      result.projectsRemoved = await purgeStaleProjects(
+        ctx.orgId,
+        docs.map((d) => d.id),
+      );
     } catch (err) {
       result.errors.push(`Project reindex failed: ${err instanceof Error ? err.message : err}`);
     }

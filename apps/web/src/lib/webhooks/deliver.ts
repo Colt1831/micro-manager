@@ -68,7 +68,7 @@ interface DeliverWebhookResult {
   errorMessage: string | null;
 }
 
-async function deliverToEndpoint(
+export async function deliverToEndpoint(
   url: string,
   payload: WebhookPayload,
   secret: string,

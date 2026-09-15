@@ -2,6 +2,40 @@ import { getDb, schema } from '@workmanagement/database';
 import { eq, and } from 'drizzle-orm';
 import { isPublicWebhookUrl } from '../webhooks/url-guard';
 import { safeWebhookDispatcher } from '../webhooks/pinned-lookup';
+import { encrypt, decrypt } from '@/lib/encryption';
+
+// ─── Webhook URL encryption at rest ─────────────────────────
+//
+// Slack webhook URLs are secrets (anyone with the URL can post to the channel),
+// so they are stored encrypted. Older rows may hold legacy plaintext URLs; this
+// helper reads either form and returns a usable URL. Writers must always call
+// `encryptWebhookUrl` so nothing new is stored in plaintext.
+
+/**
+ * Decode a stored Slack webhook URL. Handles encrypted values and legacy
+ * plaintext (a raw `https://hooks.slack.com/...` URL written before encryption).
+ * Returns null if the value can't be decoded.
+ */
+export function readWebhookUrl(stored: string | null | undefined): string | null {
+  if (!stored) return null;
+  // Legacy plaintext row — a raw URL, not the `iv:cipher:tag` / `unencrypted:` format.
+  if (stored.startsWith('https://') || stored.startsWith('http://')) return stored;
+  return decrypt(stored);
+}
+
+/**
+ * Encrypt a Slack webhook URL for storage. Fails CLOSED: if no ENCRYPTION_KEY is
+ * configured in production, `encrypt` throws — we never fall back to plaintext.
+ */
+export function encryptWebhookUrl(url: string): string {
+  const enc = encrypt(url);
+  if (!enc) {
+    // encrypt() only returns null when NODE_ENV !== production and no key; but be
+    // explicit so a missing key can never silently store plaintext.
+    throw new Error('ENCRYPTION_KEY is not configured');
+  }
+  return enc;
+}
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -78,7 +112,10 @@ export async function sendSlackNotification(
 
     if (!integration) return;
 
-    const result = await sendToWebhook(integration.webhookUrl, message);
+    const url = readWebhookUrl(integration.webhookUrl);
+    if (!url) return;
+
+    const result = await sendToWebhook(url, message);
 
     await db
       .update(schema.slackIntegrations)
