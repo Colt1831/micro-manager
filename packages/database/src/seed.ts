@@ -481,6 +481,29 @@ async function seed() {
     console.log('  ✓ Team: Core Platform');
   }
 
+  // ─── Default Leave Types ─────────────────────────────────
+  // Previously created only by a seed-on-read hack in GET /api/leave-types
+  // (removed in Phase 5 — a GET must not mutate). Seed them here idempotently
+  // so the app has types to pick. createdBy is left null (nullable).
+  const DEFAULT_LEAVE_TYPES = [
+    { name: 'Vacation', slug: 'vacation', color: '#6366f1', icon: 'Umbrella', description: 'Annual leave and vacation time', sortOrder: 0 },
+    { name: 'Sick Leave', slug: 'sick', color: '#f59e0b', icon: 'Thermometer', description: 'Medical and health-related absences', sortOrder: 1 },
+    { name: 'Personal Leave', slug: 'personal', color: '#10b981', icon: 'User', description: 'Personal errands and family matters', sortOrder: 2 },
+  ];
+
+  const existingLeaveTypes = await db
+    .select({ slug: schema.leaveTypes.slug })
+    .from(schema.leaveTypes)
+    .where(eq(schema.leaveTypes.organizationId, orgId));
+  const existingLeaveSlugs = new Set(existingLeaveTypes.map((t) => t.slug));
+  const newLeaveTypes = DEFAULT_LEAVE_TYPES.filter((t) => !existingLeaveSlugs.has(t.slug));
+  if (newLeaveTypes.length > 0) {
+    await db
+      .insert(schema.leaveTypes)
+      .values(newLeaveTypes.map((t) => ({ organizationId: orgId, ...t })));
+  }
+  console.log(`  ✓ ${DEFAULT_LEAVE_TYPES.length} default leave types`);
+
   console.log('\n✅ Seed complete!');
   console.log(
     '   Roles: super_admin, admin, owner, general_manager, manager, team_lead, senior_executive, member, viewer, executive',
