@@ -357,6 +357,16 @@ export function TaskDetailClient({
     return () => clearInterval(interval);
   }, [runningTimer]);
 
+  // ── Scroll to a #comment-<id> deep link once comments render ──
+  // Comments load async, so the browser's native hash scroll fires before the
+  // target exists. Re-run when the comment list changes and scroll it in.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#comment-')) return;
+    const el = document.getElementById(hash.slice(1));
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [comments]);
+
   // ── Refetch time entries helper ───────────────────────
 
   const refetchTimeEntries = async () => {
@@ -804,6 +814,7 @@ export function TaskDetailClient({
                     {comments.map((comment, idx) => (
                       <motion.div
                         key={comment.id}
+                        id={`comment-${comment.id}`}
                         initial={{ opacity: 0, y: -10, scale: 0.98 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         transition={{
