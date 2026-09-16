@@ -21,13 +21,14 @@ import {
   Trash2,
   Filter,
   Calendar,
+  MessageSquare,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────
 
 interface SearchHit {
   id: string;
-  type: 'task' | 'project' | 'user';
+  type: 'task' | 'project' | 'user' | 'comment';
   title: string;
   subtitle: string | null;
   description: string | null;
@@ -41,6 +42,7 @@ interface SearchResponse {
     tasks: { hits: SearchHit[]; total: number };
     projects: { hits: SearchHit[]; total: number };
     users: { hits: SearchHit[]; total: number };
+    comments: { hits: SearchHit[]; total: number };
   };
   total: number;
   query: string;
@@ -60,7 +62,7 @@ interface SavedSearch {
   createdAt: string;
 }
 
-type SearchTab = 'all' | 'tasks' | 'projects' | 'users';
+type SearchTab = 'all' | 'tasks' | 'projects' | 'users' | 'comments';
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -106,6 +108,7 @@ function getTypeIcon(type: string) {
     case 'task': return ListTodo;
     case 'project': return FolderKanban;
     case 'user': return Users;
+    case 'comment': return MessageSquare;
     default: return Hash;
   }
 }
@@ -401,11 +404,13 @@ export default function SearchPage() {
 
   // ── Render section ──────────────────────────────────────
 
-  const renderSection = (type: 'tasks' | 'projects' | 'users', label: string) => {
+  const renderSection = (type: 'tasks' | 'projects' | 'users' | 'comments', label: string) => {
     const section = results?.results[type];
     if (!section || section.hits.length === 0) return null;
 
-    const Icon = getTypeIcon(type === 'tasks' ? 'task' : type === 'projects' ? 'project' : 'user');
+    const Icon = getTypeIcon(
+      type === 'tasks' ? 'task' : type === 'projects' ? 'project' : type === 'users' ? 'user' : 'comment',
+    );
 
     return (
       <motion.div variants={itemVariants}>
@@ -415,7 +420,7 @@ export default function SearchPage() {
           <span className="text-surface-400 text-[10px]">{section.total} result{section.total !== 1 ? 's' : ''}</span>
           {activeTab === 'all' && section.total > 0 && (
             <button
-              onClick={() => setActiveTab(type === 'tasks' ? 'tasks' : type === 'projects' ? 'projects' : 'users')}
+              onClick={() => setActiveTab(type)}
               className="text-brand-500 hover:text-brand-400 ml-auto text-[10px] font-medium"
             >
               View all
@@ -435,6 +440,7 @@ export default function SearchPage() {
     tasks: results?.results.tasks.total ?? 0,
     projects: results?.results.projects.total ?? 0,
     users: results?.results.users.total ?? 0,
+    comments: results?.results.comments.total ?? 0,
   };
 
   const TAB_CONFIG: { id: SearchTab; label: string; count: number }[] = [
@@ -442,6 +448,7 @@ export default function SearchPage() {
     { id: 'tasks', label: 'Tasks', count: counts.tasks },
     { id: 'projects', label: 'Projects', count: counts.projects },
     { id: 'users', label: 'Users', count: counts.users },
+    { id: 'comments', label: 'Comments', count: counts.comments },
   ];
 
   // ── Render ─────────────────────────────────────────────
@@ -844,6 +851,7 @@ export default function SearchPage() {
                 {renderSection('tasks', 'Tasks')}
                 {renderSection('projects', 'Projects')}
                 {renderSection('users', 'Users')}
+                {renderSection('comments', 'Comments')}
                 </div>
               ) : null}
             </div>

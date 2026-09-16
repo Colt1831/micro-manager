@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 
 interface SearchHit {
   id: string;
-  type: 'task' | 'project' | 'user';
+  type: 'task' | 'project' | 'user' | 'comment';
   title: string;
   subtitle: string | null;
   description: string | null;
@@ -26,6 +26,7 @@ interface SearchResponse {
     tasks: { hits: SearchHit[]; total: number };
     projects: { hits: SearchHit[]; total: number };
     users: { hits: SearchHit[]; total: number };
+    comments: { hits: SearchHit[]; total: number };
   };
   total: number;
   query: string;
@@ -43,7 +44,7 @@ export const GET = withAuth(
     const filterPriority = searchParams.get('priority');
 
     const response: SearchResponse = {
-      results: { tasks: { hits: [], total: 0 }, projects: { hits: [], total: 0 }, users: { hits: [], total: 0 } },
+      results: { tasks: { hits: [], total: 0 }, projects: { hits: [], total: 0 }, users: { hits: [], total: 0 }, comments: { hits: [], total: 0 } },
       total: 0,
       query,
     };
@@ -243,8 +244,57 @@ export const GET = withAuth(
       };
     }
 
+    // ── Search comments via dept-scoped DB (never Meilisearch) ──
+    // Comments are matched through their parent task so org + department
+    // scope and soft-deletes are enforced by the task join. Internal notes
+    // are excluded — they are a visibility boundary, not general content.
+    if (searchType === 'all' || searchType === 'comments') {
+      const searchPattern = `%${query}%`;
+      const commentConditions = [
+        isNull(schema.taskComments.deletedAt),
+        isNull(schema.tasks.deletedAt),
+        eq(schema.tasks.organizationId, orgId!),
+        like(schema.taskComments.content, searchPattern),
+        // Exclude internal notes (default false; treat NULL as public too).
+        or(eq(schema.taskComments.isInternalNote, false), isNull(schema.taskComments.isInternalNote))!,
+      ];
+      applyDeptScope(commentConditions, scope, schema.tasks.departmentId);
+
+      const comments = await db
+        .select({
+          id: schema.taskComments.id,
+          content: schema.taskComments.content,
+          taskId: schema.taskComments.taskId,
+          taskTitle: schema.tasks.title,
+          taskIdDisplay: schema.tasks.taskIdDisplay,
+        })
+        .from(schema.taskComments)
+        .innerJoin(schema.tasks, eq(schema.taskComments.taskId, schema.tasks.id))
+        .where(and(...commentConditions))
+        .orderBy(desc(schema.taskComments.createdAt))
+        .limit(limit);
+
+      response.results.comments = {
+        hits: comments.map((c) => ({
+          id: c.id,
+          type: 'comment' as const,
+          title: c.taskTitle,
+          subtitle: c.taskIdDisplay,
+          description: c.content.length > 200 ? `${c.content.slice(0, 200)}…` : c.content,
+          status: null,
+          url: `/tasks/${c.taskId}#comment-${c.id}`,
+          metadata: { taskId: c.taskId },
+        })),
+        total: comments.length,
+      };
+    }
+
     // ── Compute total ────────────────────────────────────
-    response.total = response.results.tasks.total + response.results.projects.total + response.results.users.total;
+    response.total =
+      response.results.tasks.total +
+      response.results.projects.total +
+      response.results.users.total +
+      response.results.comments.total;
 
     return NextResponse.json(response);
   },

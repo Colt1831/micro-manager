@@ -15,6 +15,7 @@ import {
   ListTodo,
   FolderKanban,
   User,
+  MessageSquare,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { navItems } from './sidebar';
@@ -23,7 +24,7 @@ import { navItems } from './sidebar';
 
 interface SearchHit {
   id: string;
-  type: 'task' | 'project' | 'user';
+  type: 'task' | 'project' | 'user' | 'comment';
   title: string;
   subtitle: string | null;
   description: string | null;
@@ -37,12 +38,13 @@ interface SearchApiResponse {
     tasks: { hits: SearchHit[]; total: number };
     projects: { hits: SearchHit[]; total: number };
     users: { hits: SearchHit[]; total: number };
+    comments: { hits: SearchHit[]; total: number };
   };
   total: number;
   query: string;
 }
 
-type PaletteItemType = 'command' | 'task' | 'project' | 'user';
+type PaletteItemType = 'command' | 'task' | 'project' | 'user' | 'comment';
 
 interface PaletteItem {
   id: string;
@@ -209,6 +211,17 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
             icon: User,
             href: h.url,
             badge: h.status ?? undefined,
+          }),
+        );
+        data.results.comments.hits.forEach((h) =>
+          searchItems.push({
+            id: `comment-${h.id}`,
+            type: 'comment',
+            group: 'Comments',
+            label: h.description ?? h.title,
+            sublabel: h.subtitle ?? h.title,
+            icon: MessageSquare,
+            href: h.url,
           }),
         );
 

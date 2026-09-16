@@ -6,7 +6,7 @@ import type { Page } from '@playwright/test';
 
 interface MockSearchHit {
   id: string;
-  type: 'task' | 'project' | 'user';
+  type: 'task' | 'project' | 'user' | 'comment';
   title: string;
   subtitle: string | null;
   description: string | null;
@@ -16,11 +16,12 @@ interface MockSearchHit {
 }
 
 /** Search hits returned for any query — one per entity type so the palette
- *  shows all three result groups (Tasks, Projects, People). */
+ *  shows all four result groups (Tasks, Projects, People, Comments). */
 export const MOCK_SEARCH_HITS: {
   tasks: MockSearchHit[];
   projects: MockSearchHit[];
   users: MockSearchHit[];
+  comments: MockSearchHit[];
 } = {
   tasks: [
     {
@@ -58,6 +59,18 @@ export const MOCK_SEARCH_HITS: {
       metadata: {},
     },
   ],
+  comments: [
+    {
+      id: 'comment-s1',
+      type: 'comment',
+      title: 'Payroll integration',
+      subtitle: 'TASK-042',
+      description: 'Payment reconciliation comment',
+      status: null,
+      url: '/tasks/task-s1#comment-comment-s1',
+      metadata: { taskId: 'task-s1' },
+    },
+  ],
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -89,8 +102,9 @@ export async function mockSearchApi(page: Page) {
           tasks: { hits: MOCK_SEARCH_HITS.tasks, total: MOCK_SEARCH_HITS.tasks.length },
           projects: { hits: MOCK_SEARCH_HITS.projects, total: MOCK_SEARCH_HITS.projects.length },
           users: { hits: MOCK_SEARCH_HITS.users, total: MOCK_SEARCH_HITS.users.length },
+          comments: { hits: MOCK_SEARCH_HITS.comments, total: MOCK_SEARCH_HITS.comments.length },
         },
-        total: 3,
+        total: 4,
         query,
       }),
     });

@@ -78,8 +78,23 @@ function mockSearchResponse() {
             ],
             total: 1,
           },
+          comments: {
+            hits: [
+              {
+                id: 'c1',
+                type: 'comment',
+                title: 'Test Task',
+                subtitle: 'TASK-1',
+                description: 'A matching comment body',
+                status: null,
+                url: '/tasks/t1#comment-c1',
+                metadata: { taskId: 't1' },
+              },
+            ],
+            total: 1,
+          },
         },
-        total: 3,
+        total: 4,
         query: 'test',
       }),
     ),
@@ -144,6 +159,7 @@ describe('SearchCommand', () => {
       expect(screen.getByText('Test Task')).toBeInTheDocument();
       expect(screen.getByText('Test Project')).toBeInTheDocument();
       expect(screen.getByText('Test User')).toBeInTheDocument();
+      expect(screen.getByText('A matching comment body')).toBeInTheDocument();
     });
   });
 
