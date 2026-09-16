@@ -91,7 +91,7 @@ export function leavesByDateFrom(leaves: Leave[]): Map<string, Leave[]> {
   return map;
 }
 
-type ViewMode = 'month' | 'week';
+type ViewMode = 'month' | 'week' | 'day';
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -860,6 +860,93 @@ function WeekView({
   );
 }
 
+// ─── Day View ───────────────────────────────────────────────
+
+function DayView({
+  date,
+  today,
+  tasksByDate,
+  milestonesByDate,
+  leavesByDate,
+}: {
+  date: Date;
+  today: Date;
+  tasksByDate: Map<string, Task[]>;
+  milestonesByDate: Map<string, Milestone[]>;
+  leavesByDate: Map<string, Leave[]>;
+}) {
+  const isToday = isSameDay(date, today);
+  const key = date.toDateString();
+  const dayTasks = tasksByDate.get(key) ?? [];
+  const dayMilestones = milestonesByDate.get(key) ?? [];
+  const dayLeaves = leavesByDate.get(key) ?? [];
+  const totalItems = dayTasks.length + dayMilestones.length + dayLeaves.length;
+
+  return (
+    <div className="border-surface-300/20 grid grid-cols-1 border-l border-t">
+      {/* Day header */}
+      <div
+        className={cn(
+          'border-surface-300/20 border-b border-r px-3 py-2.5',
+          isToday ? 'bg-brand-500/5' : 'bg-surface-50/50 ',
+        )}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-surface-500 text-[10px] font-semibold uppercase tracking-wider">
+            {DAYS[date.getDay()]}
+          </span>
+          <span
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold',
+              isToday ? 'bg-brand-500 text-white' : 'text-surface-700 ',
+            )}
+          >
+            {date.getDate()}
+          </span>
+          <span className="text-surface-500 text-xs">
+            {MONTHS[date.getMonth()]} {date.getFullYear()}
+          </span>
+        </div>
+      </div>
+
+      {/* Day items — all items listed (no cap; a single day has room) */}
+      <DroppableDayCell date={date} isToday={isToday}>
+        {totalItems === 0 ? (
+          <p className="text-surface-400 py-6 text-center text-xs">
+            No items due this day
+          </p>
+        ) : (
+          <div className="space-y-0.5">
+            {dayLeaves.map((lv) => (
+              <LeaveBadge key={`lv-${lv.id}`} leave={lv} />
+            ))}
+            {dayMilestones.map((m, idx) => (
+              <Popover key={m.id}>
+                <PopoverTrigger asChild>
+                  <button className="w-full text-left">
+                    <MilestoneBadge milestone={m} index={idx} />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="right"
+                  align="start"
+                  sideOffset={8}
+                  className="overflow-visible border-0 bg-transparent p-0 shadow-none"
+                >
+                  <MilestonePopoverContent milestone={m} index={idx} onClose={() => {}} />
+                </PopoverContent>
+              </Popover>
+            ))}
+            {dayTasks.map((t) => (
+              <DraggableTaskItem key={t.id} task={t} />
+            ))}
+          </div>
+        )}
+      </DroppableDayCell>
+    </div>
+  );
+}
+
 // ─── Main Page ──────────────────────────────────────────────
 
 export interface CalendarClientProps {
@@ -944,7 +1031,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
       } else {
         setCurrentDate((prev) => {
           const d = new Date(prev);
-          d.setDate(d.getDate() + dir * 7);
+          d.setDate(d.getDate() + dir * (viewMode === 'week' ? 7 : 1));
           return d;
         });
       }
@@ -971,6 +1058,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
       else if (e.key === 'T' || e.key === 't') goToday();
       else if (e.key === 'w' || e.key === 'W') setViewMode('week');
       else if (e.key === 'm' || e.key === 'M') setViewMode('month');
+      else if (e.key === 'd' || e.key === 'D') setViewMode('day');
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -1180,6 +1268,19 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
             >
               Week
             </button>
+            <button
+              role="tab"
+              aria-selected={viewMode === 'day'}
+              onClick={() => setViewMode('day')}
+              className={cn(
+                'rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
+                viewMode === 'day'
+                  ? 'bg-surface-50 text-surface-900 shadow-sm'
+                  : 'text-surface-500 hover:text-surface-700 ',
+              )}
+            >
+              Day
+            </button>
           </div>
         </div>
       </div>
@@ -1192,7 +1293,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
               <button
                 onClick={() => navigate(-1)}
                 className="text-surface-500 hover:bg-surface-200/70 hover:text-surface-600 rounded-xl p-2 transition-all"
-                aria-label={viewMode === 'month' ? 'Previous month' : 'Previous week'}
+                aria-label={viewMode === 'month' ? 'Previous month' : viewMode === 'week' ? 'Previous week' : 'Previous day'}
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -1207,7 +1308,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
               <button
                 onClick={() => navigate(1)}
                 className="text-surface-500 hover:bg-surface-200/70 hover:text-surface-600 rounded-xl p-2 transition-all"
-                aria-label={viewMode === 'month' ? 'Next month' : 'Next week'}
+                aria-label={viewMode === 'month' ? 'Next month' : viewMode === 'week' ? 'Next week' : 'Next day'}
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -1219,11 +1320,15 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
                 <button className="text-surface-900 hover:bg-surface-200/50 flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-base font-semibold transition-colors">
                   {viewMode === 'month' ? (
                     <>{MONTHS[month]} {year}</>
-                  ) : (
+                  ) : viewMode === 'week' ? (
                     <>
                       {MONTHS_SHORT[weekDays[0]!.getMonth()]} {weekDays[0]!.getDate()}
                       {' — '}
                       {MONTHS_SHORT[weekDays[6]!.getMonth()]} {weekDays[6]!.getDate()}, {weekDays[6]!.getFullYear()}
+                    </>
+                  ) : (
+                    <>
+                      {DAYS[currentDate.getDay()]} {MONTHS_SHORT[currentDate.getMonth()]} {currentDate.getDate()}, {currentDate.getFullYear()}
                     </>
                   )}
                   <ChevronDown className="text-surface-400 h-3.5 w-3.5" />
@@ -1256,6 +1361,8 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
               <kbd className="bg-surface-200/50 text-surface-500 rounded-md px-1.5 py-0.5 text-[10px] font-mono">M</kbd>
               <span className="text-surface-400 text-[10px]">/</span>
               <kbd className="bg-surface-200/50 text-surface-500 rounded-md px-1.5 py-0.5 text-[10px] font-mono">W</kbd>
+              <span className="text-surface-400 text-[10px]">/</span>
+              <kbd className="bg-surface-200/50 text-surface-500 rounded-md px-1.5 py-0.5 text-[10px] font-mono">D</kbd>
               <span className="text-surface-400 text-[10px]">Views</span>
             </div>
           </div>
@@ -1276,7 +1383,9 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
                     key={
                       viewMode === 'month'
                         ? `month-${year}-${month}`
-                        : `week-${weekDays[0]!.toDateString()}`
+                        : viewMode === 'week'
+                          ? `week-${weekDays[0]!.toDateString()}`
+                          : `day-${currentDate.toDateString()}`
                     }
                     custom={direction}
                     variants={slideVariants}
@@ -1297,9 +1406,17 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
                         milestonesByDate={milestonesByDate}
                         leavesByDate={leavesByDate}
                       />
-                    ) : (
+                    ) : viewMode === 'week' ? (
                       <WeekView
                         weekDays={weekDays}
+                        today={today}
+                        tasksByDate={tasksByDate}
+                        milestonesByDate={milestonesByDate}
+                        leavesByDate={leavesByDate}
+                      />
+                    ) : (
+                      <DayView
+                        date={currentDate}
                         today={today}
                         tasksByDate={tasksByDate}
                         milestonesByDate={milestonesByDate}

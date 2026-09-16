@@ -153,6 +153,31 @@ test.describe('Calendar', () => {
     await expect(page.getByText('Approved leave', { exact: true })).toBeVisible();
   });
 
+  test('switches to day view and renders a task on the selected day', async ({ page }) => {
+    await mockCalendarApis(page);
+
+    await page.goto('/calendar');
+
+    // Wait for page to hydrate
+    await expect(
+      page.getByRole('heading', { name: 'Calendar', exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // Click the Day view tab
+    await page.getByRole('tab', { name: /^day$/i }).click();
+
+    // Today's date badge should be visible in the day header
+    const today = todayDate();
+    await expect(page.getByText(String(today)).first()).toBeVisible();
+
+    // Today's task should render in the day view
+    await expect(page.getByText(/Review Q3 roadmap/i).first()).toBeVisible();
+
+    // Navigating to the next day should hide today's task (it's not due then)
+    await page.getByRole('button', { name: /next day/i }).click();
+    await expect(page.getByText(/Review Q3 roadmap/i)).not.toBeVisible();
+  });
+
   test('switches to week view and shows correct layout', async ({ page }) => {
     await mockCalendarApis(page);
 
