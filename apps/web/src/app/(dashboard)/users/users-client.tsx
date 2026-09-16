@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState, startTransition } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -341,11 +342,14 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-surface-900 truncate font-medium">
+                      <Link
+                        href={`/users/${user.id}`}
+                        className="text-surface-900 hover:text-brand-400 truncate font-medium transition-colors"
+                      >
                         {user.firstName && user.lastName
                           ? `${user.firstName} ${user.lastName}`
                           : (user.name ?? user.email)}
-                      </p>
+                      </Link>
                       <Badge
                         variant={user.isActive ? 'success' : 'default'}
                         size="sm"
