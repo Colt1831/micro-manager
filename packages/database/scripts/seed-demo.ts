@@ -246,6 +246,11 @@ async function main() {
         .where(and(eq(schema.tasks.organizationId, orgId), eq(schema.tasks.taskIdDisplay, displayId)))
         .limit(1);
       if (existing) {
+        // Converge assignment on re-run so an earlier partial seed is repaired.
+        await db
+          .update(schema.tasks)
+          .set({ assignedTo: userIdByEmail.get(t.assignee)!, assignedBy: creatorId })
+          .where(eq(schema.tasks.id, existing.id));
         createdTaskIds.push(existing.id);
         continue;
       }
@@ -260,7 +265,8 @@ async function main() {
           priority: t.priority,
           projectId,
           departmentId: deptId,
-          assigneeId: userIdByEmail.get(t.assignee)!,
+          assignedTo: userIdByEmail.get(t.assignee)!,
+          assignedBy: creatorId,
           createdBy: creatorId,
           dueDate: daysFromNow(t.due),
         })
@@ -270,6 +276,43 @@ async function main() {
     }
   }
   console.log(`  ✓ Tasks: ${taskCount} created`);
+
+  // ─── Milestones (Milestones page + Gantt markers) ───────
+  const MILESTONES: Record<string, Array<{ name: string; status: string; due: number }>> = {
+    PLAT: [
+      { name: 'Auth service extracted', status: 'completed', due: -10 },
+      { name: 'Workers handling all jobs', status: 'in_progress', due: 12 },
+      { name: 'Legacy platform retired', status: 'pending', due: 45 },
+    ],
+    PIPE: [
+      { name: 'Q4 pipeline qualified', status: 'in_progress', due: 7 },
+      { name: 'Enterprise renewals signed', status: 'pending', due: 30 },
+    ],
+    VEND: [
+      { name: 'Vendor audit complete', status: 'completed', due: -4 },
+      { name: 'All vendors migrated', status: 'pending', due: 38 },
+    ],
+  };
+  for (const pr of PROJECTS) {
+    const projectId = projectIdByKey.get(pr.key)!;
+    for (const [i, m] of MILESTONES[pr.key]!.entries()) {
+      const [existing] = await db
+        .select({ id: schema.milestones.id })
+        .from(schema.milestones)
+        .where(and(eq(schema.milestones.projectId, projectId), eq(schema.milestones.name, m.name)))
+        .limit(1);
+      if (existing) continue;
+      await db.insert(schema.milestones).values({
+        projectId,
+        name: m.name,
+        description: `${m.name} — milestone for ${pr.name}.`,
+        status: m.status,
+        dueDate: dateStr(m.due),
+        sortOrder: i,
+      });
+    }
+  }
+  console.log('  ✓ Milestones seeded');
 
   // ─── Comments (so global comment search returns hits) ────
   const COMMENTS = [

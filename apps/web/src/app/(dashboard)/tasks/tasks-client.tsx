@@ -47,6 +47,7 @@ export type Task = {
   priority: string;
   taskIdDisplay: string;
   assignedTo: string | null;
+  assignedToName?: string | null;
   projectId: string | null;
   dueDate: string | null;
   createdAt: string;
@@ -1320,9 +1321,9 @@ export function TasksClient({ initialTasks, initialTotal, initialUsers }: TasksC
                             {task.assignedTo ? (
                               <div className="group/assignee flex items-center gap-1.5">
                                 <div className="from-brand-400 to-brand-600 ring-surface-200/50 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br text-[8px] font-medium text-white ring-2 transition-transform duration-200 group-hover/assignee:scale-110 sm:h-6 sm:w-6 sm:text-[9px]">
-                                  {task.assignedTo.charAt(0).toUpperCase()}
+                                  {(task.assignedToName ?? task.assignedTo).charAt(0).toUpperCase()}
                                 </div>
-                                <span className="max-w-[60px] truncate sm:max-w-[80px]">{task.assignedTo}</span>
+                                <span className="max-w-[60px] truncate sm:max-w-[80px]">{task.assignedToName ?? 'Unknown'}</span>
                               </div>
                             ) : (
                               <span className="text-surface-500">—</span>

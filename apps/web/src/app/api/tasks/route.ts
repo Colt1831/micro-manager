@@ -138,13 +138,21 @@ export const GET = withAuth(
           updatedByName: r.updatedByName,
         }));
       } else {
-        tasks = await db()
-          .select()
+        // Join the assignee so the UI can show a name. Without this the list
+        // only had assignedTo (a user id) and rendered a raw UUID.
+        const rows = await db()
+          .select({
+            task: schema.tasks,
+            assignedToName: schema.users.name,
+          })
           .from(schema.tasks)
+          .leftJoin(schema.users, eq(schema.tasks.assignedTo, schema.users.id))
           .where(and(...conditions))
           .orderBy(desc(schema.tasks.createdAt))
           .limit(limit)
           .offset(offset);
+
+        tasks = rows.map((r) => ({ ...r.task, assignedToName: r.assignedToName }));
       }
 
       return NextResponse.json({ tasks, total });
