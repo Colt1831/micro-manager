@@ -14,13 +14,20 @@ const publicPaths = [
 ];
 
 /**
- * Better Auth uses 'better-auth.session_token' as the session cookie name
- * regardless of the custom cookie.name config option.
+ * Better Auth names the session cookie 'better-auth.session_token', but over
+ * HTTPS it prefixes it with '__Secure-' (secure cookies). This middleware runs
+ * on both http (local dev) and https (any real deployment / tunnel), so it must
+ * accept either name — checking only the bare name breaks auth behind HTTPS:
+ * every protected route bounces to /auth/login despite a valid session, an
+ * infinite redirect loop that makes the deployed app unusable.
  */
 const SESSION_COOKIE_NAME = 'better-auth.session_token';
+const SESSION_COOKIE_NAME_SECURE = '__Secure-better-auth.session_token';
 
 export function proxy(request: NextRequest) {
-  const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const sessionToken =
+    request.cookies.get(SESSION_COOKIE_NAME)?.value ??
+    request.cookies.get(SESSION_COOKIE_NAME_SECURE)?.value;
   const { pathname } = request.nextUrl;
 
   // Allow public paths
