@@ -291,6 +291,9 @@ export function SettingsClient({ initialOrg = null }: { initialOrg?: Organizatio
   const [org, setOrg] = useState<Organization | null>(initialOrg);
   const [loading, setLoading] = useState(initialOrg === null);
   const [name, setName] = useState(initialOrg?.name ?? '');
+  const [domain, setDomain] = useState(initialOrg?.domain ?? '');
+  const [savingOrg, setSavingOrg] = useState(false);
+  const [orgError, setOrgError] = useState<string | null>(null);
   const [notifPrefs, setNotifPrefs] = useState<NotifPreferences>(DEFAULT_NOTIF_PREFS);
   const [notifPrefsLoading, setNotifPrefsLoading] = useState(true);
   const [notifPrefsSaving, setNotifPrefsSaving] = useState(false);
@@ -340,6 +343,7 @@ export function SettingsClient({ initialOrg = null }: { initialOrg?: Organizatio
         const data = await res.json();
         setOrg(data.organization ?? null);
         setName(data.organization?.name ?? '');
+        setDomain(data.organization?.domain ?? '');
       } catch {
         /* */
       } finally {
@@ -348,6 +352,29 @@ export function SettingsClient({ initialOrg = null }: { initialOrg?: Organizatio
     }
     fetchOrg();
   }, [hadInitialData]);
+
+  const saveOrg = async () => {
+    setSavingOrg(true);
+    setOrgError(null);
+    try {
+      const res = await fetch('/api/organization', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), domain: domain.trim() || null }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error?.message ?? 'Failed to save organization');
+      }
+      const data = await res.json();
+      setOrg(data.organization ?? org);
+      toast({ title: 'Organization updated', variant: 'success' });
+    } catch (err) {
+      setOrgError(err instanceof Error ? err.message : 'Failed to save organization');
+    } finally {
+      setSavingOrg(false);
+    }
+  };
 
   const fetchRoles = useCallback(async () => {
     setRolesLoading(true);
@@ -681,28 +708,52 @@ export function SettingsClient({ initialOrg = null }: { initialOrg?: Organizatio
                   <SettingsIcon className="text-surface-400 h-4 w-4" />
                   General Settings
                 </h2>
-                {[
-                  { label: 'Organization Name', value: name },
-                  { label: 'Slug', value: org?.slug ?? '' },
-                  { label: 'Domain', value: org?.domain ?? '', placeholder: 'your-company.com' },
-                ].map((field) => (
-                  <FormField key={field.label} label={field.label} className="max-w-md">
-                    <input
-                      type="text"
-                      aria-label={field.label}
-                      value={field.value}
-                      disabled
-                      placeholder={field.placeholder}
-                      // These read-only fields are now server-rendered. The browser
-                      // applies a client-only `caret-color: transparent` to disabled
-                      // inputs, which React would otherwise flag as a hydration
-                      // mismatch — suppress it here since the value is server-authoritative.
-                      suppressHydrationWarning
-                      className="border-surface-300/20 bg-surface-200/50 text-surface-500 w-full cursor-not-allowed rounded-xl border px-3 py-2.5 text-sm"
-                    />
-                  </FormField>
-                ))}
-                <p className="text-surface-500 text-xs pt-1">General settings cannot be edited yet.</p>
+                <FormField label="Organization Name" className="max-w-md">
+                  <input
+                    type="text"
+                    aria-label="Organization Name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    maxLength={255}
+                    className="border-surface-300/30 bg-surface-100 focus:border-brand-500 focus:ring-brand-500/20 w-full rounded-xl border px-3 py-2.5 text-sm transition-all focus:outline-none focus:ring-2"
+                  />
+                </FormField>
+                <FormField label="Slug" className="max-w-md">
+                  <input
+                    type="text"
+                    aria-label="Slug"
+                    value={org?.slug ?? ''}
+                    disabled
+                    suppressHydrationWarning
+                    className="border-surface-300/20 bg-surface-200/50 text-surface-500 w-full cursor-not-allowed rounded-xl border px-3 py-2.5 text-sm"
+                  />
+                </FormField>
+                <FormField label="Domain" className="max-w-md">
+                  <input
+                    type="text"
+                    aria-label="Domain"
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    placeholder="your-company.com"
+                    maxLength={255}
+                    className="border-surface-300/30 bg-surface-100 focus:border-brand-500 focus:ring-brand-500/20 w-full rounded-xl border px-3 py-2.5 text-sm transition-all focus:outline-none focus:ring-2"
+                  />
+                </FormField>
+                {orgError && (
+                  <p className="text-error text-xs">{orgError}</p>
+                )}
+                <div className="pt-1">
+                  <Button
+                    size="sm"
+                    onClick={saveOrg}
+                    disabled={savingOrg || name.trim().length === 0}
+                    className="rounded-lg"
+                  >
+                    {savingOrg ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                    Save changes
+                  </Button>
+                </div>
+                <p className="text-surface-500 text-xs">The slug is your organization&apos;s permanent identifier and cannot be changed.</p>
               </div>
             </SectionCard>
 
