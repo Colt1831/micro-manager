@@ -51,6 +51,7 @@ test.describe('Calendar', () => {
       milestones: [
         { id: 'm1', projectId: 'p1', projectName: 'Test', name: 'No date milestone', description: null, status: 'pending', dueDate: null, completedDate: null },
       ] as unknown as Record<string, unknown>[],
+      leaves: [],
     });
 
     await page.goto('/calendar');
@@ -133,6 +134,23 @@ test.describe('Calendar', () => {
 
     // Milestone without due date should NOT be visible
     await expect(page.getByText(/Hidden milestone/i)).not.toBeVisible();
+  });
+
+  test('overlays approved leave badges', async ({ page }) => {
+    await mockCalendarApis(page);
+
+    await page.goto('/calendar');
+
+    await expect(
+      page.getByRole('heading', { name: 'Calendar', exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // Approved leave shows the leave-taker's name; half-day carries the ½ cue.
+    await expect(page.getByText(/Riya Kapoor/i).first()).toBeVisible();
+    await expect(page.getByText(/Sam Lee ½/i).first()).toBeVisible();
+
+    // Legend gains an approved-leave entry.
+    await expect(page.getByText('Approved leave', { exact: true })).toBeVisible();
   });
 
   test('switches to week view and shows correct layout', async ({ page }) => {

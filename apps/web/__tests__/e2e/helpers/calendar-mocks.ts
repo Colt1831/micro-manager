@@ -139,6 +139,40 @@ export function getMockMilestones(): Record<string, unknown>[] {
   ];
 }
 
+/**
+ * Generate mock approved leave within the current month.
+ * - leave-1: single day, today → shows a leave badge
+ * - leave-2: two-day span starting tomorrow → badge on both days
+ */
+export function getMockApprovedLeave(): Record<string, unknown>[] {
+  const [d1, d2] = pickDistinctDays(2) as [Date, Date];
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const d2end = new Date(d2);
+  d2end.setDate(d2end.getDate() + 1);
+  return [
+    {
+      id: 'leave-1',
+      userId: 'user-1',
+      startDate: iso(d1),
+      endDate: iso(d1),
+      isHalfDay: false,
+      status: 'approved',
+      user: { id: 'user-1', name: 'Riya Kapoor' },
+      leaveType: { name: 'Casual Leave', color: '#0ea5e9' },
+    },
+    {
+      id: 'leave-2',
+      userId: 'user-2',
+      startDate: iso(d2),
+      endDate: iso(d2end),
+      isHalfDay: true,
+      status: 'approved',
+      user: { id: 'user-2', name: 'Sam Lee' },
+      leaveType: { name: 'Sick Leave', color: '#f59e0b' },
+    },
+  ];
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  Mock Helpers
 // ═══════════════════════════════════════════════════════════════
@@ -162,6 +196,7 @@ export async function mockCalendarApis(
   options: {
     tasks?: readonly Record<string, unknown>[];
     milestones?: readonly Record<string, unknown>[];
+    leaves?: readonly Record<string, unknown>[];
     /** If true, abort ALL API calls to simulate network failure. */
     abort?: boolean;
     /** Delay in ms before fulfilling requests (to test loading state). */
@@ -171,6 +206,7 @@ export async function mockCalendarApis(
   const {
     tasks = getMockCalendarTasks(),
     milestones = getMockMilestones(),
+    leaves = getMockApprovedLeave(),
     abort: shouldAbort,
     delay,
   } = options;
@@ -216,6 +252,29 @@ export async function mockCalendarApis(
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ milestones }),
+      });
+    },
+  );
+
+  // Leave-requests API — the calendar overlays approved leave, fetched on
+  // mount and on month change. Match by pathname so date-range query params
+  // don't bypass the route.
+  await page.route(
+    (url) => url.pathname.startsWith('/api/leave-requests'),
+    async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.fallback();
+        return;
+      }
+      if (shouldAbort) {
+        await route.abort('connectionrefused');
+        return;
+      }
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ requests: leaves }),
       });
     },
   );
