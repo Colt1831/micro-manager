@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, enforceOrgScope, requirePermission, getUserRank } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull } from 'drizzle-orm';
@@ -15,7 +15,7 @@ function getIdFromPath(request: NextRequest): string {
 
 // GET /api/users/[id] - Get single user (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'user:view');
       const id = getIdFromPath(request);
@@ -55,6 +55,17 @@ export const GET = withAuth(
 
       enforceOrgScope(found.organizationId, orgId);
 
+      // Department wall (spec §3): the wall must cover detail reads too, not
+      // just the list — otherwise a known user id is readable across the wall
+      // and leaks email, phone, designation and the reporting line. 404 (not
+      // 403) so a cross-dept id is indistinguishable from a missing one.
+      if (!canAccessDept(scope, found.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'User not found' } },
+          { status: 404 },
+        );
+      }
+
       return NextResponse.json({ user: found });
     } catch (error) {
       const { error: err, status } = handleApiError(error, 'Failed to fetch user');
@@ -66,7 +77,7 @@ export const GET = withAuth(
 
 // PATCH /api/users/[id] - Update user (rate limited: 60 req/min per user)
 export const PATCH = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'user:edit');
       const id = getIdFromPath(request);
@@ -100,6 +111,29 @@ export const PATCH = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall (spec §3) on the MUTATION path: without this a manager
+      // could edit a user in another department — rank, reporting line and all.
+      if (!canAccessDept(scope, existing.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'User not found' } },
+          { status: 404 },
+        );
+      }
+
+      // A walled actor must not move a user OUT of their department either:
+      // that would hand the target to a department the actor cannot see.
+      if (departmentId != null && !canAccessDept(scope, departmentId)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'FORBIDDEN',
+              message: 'Cannot move a user into a department outside your scope',
+            },
+          },
+          { status: 403 },
+        );
+      }
 
       // Cross-tenant guards: replacement department/team/manager must be same-org.
       for (const denial of [
@@ -201,7 +235,7 @@ export const PATCH = withAuth(
 
 // DELETE /api/users/[id] - Deactivate/soft-delete a user (admin, 30 req/min)
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'user:delete');
       const id = getIdFromPath(request);
@@ -218,6 +252,7 @@ export const DELETE = withAuth(
           id: schema.users.id,
           email: schema.users.email,
           organizationId: schema.users.organizationId,
+          departmentId: schema.users.departmentId,
         })
         .from(schema.users)
         .where(and(eq(schema.users.id, id), isNull(schema.users.deletedAt)))
@@ -233,6 +268,16 @@ export const DELETE = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Cross-organization access denied' } },
           { status: 403 },
+        );
+      }
+
+      // Department wall (spec §3) on the destructive path: without this a
+      // manager could deactivate a user in another department and kill their
+      // sessions. 404 keeps a cross-dept id indistinguishable from a missing one.
+      if (!canAccessDept(scope, target.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'User not found' } },
+          { status: 404 },
         );
       }
 

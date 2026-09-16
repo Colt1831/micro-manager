@@ -31,7 +31,13 @@ vi.mock('@/lib/auth/api-auth', () => ({
   withAuth:
     (handler: Function) =>
     async (req: unknown) =>
-      handler(req, { user: { id: 'actor-1', email: 'a@test.com', name: 'Actor' }, orgId: 'org-1' }),
+      handler(req, {
+        user: { id: 'actor-1', email: 'a@test.com', name: 'Actor' },
+        orgId: 'org-1',
+        // The user detail routes now gate on the department wall too; give the
+        // actor org-wide sight so these tests exercise the RANK gate only.
+        scope: { rank: 'super_admin', level: 100, departmentId: null, seeAllDepartments: true },
+      }),
   requirePermission: mockRequirePermission,
   enforceOrgScope: vi.fn(), // no-op: org match is asserted separately, not under test here
   getUserRank: mockGetUserRank,
@@ -39,6 +45,10 @@ vi.mock('@/lib/auth/api-auth', () => ({
 
 vi.mock('@/lib/api/db', () => ({
   db: mockDb,
+  // Real signature: seeAllDepartments short-circuits to true. Mirrored here so
+  // the rank tests aren't accidentally gated by the department wall.
+  canAccessDept: (scope: { seeAllDepartments?: boolean; departmentId?: string | null }, dept: string | null) =>
+    scope?.seeAllDepartments === true || (dept != null && dept === scope?.departmentId),
   schema: {
     users: { id: 'users.id', organizationId: 'users.orgId', deletedAt: 'users.deletedAt', rank: 'users.rank' },
     roles: { id: 'roles.id', organizationId: 'roles.orgId', priority: 'roles.priority', isActive: 'roles.isActive', deletedAt: 'roles.deletedAt' },

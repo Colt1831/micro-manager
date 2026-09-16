@@ -23,6 +23,9 @@ const {
 }));
 
 vi.mock('@/lib/api/db', () => ({
+  // Mirrors the real helper: seeAllDepartments short-circuits to true.
+  canAccessDept: (scope: { seeAllDepartments?: boolean; departmentId?: string | null }, dept: string | null) =>
+    scope?.seeAllDepartments === true || (dept != null && dept === scope?.departmentId),
   db: mockDb,
   schema: { users: new Proxy({}, { get: (_t, p) => String(p) }), sessions: {} },
   handleApiError: (e: unknown) => ({ error: { code: 'INTERNAL', message: String(e) }, status: 500 }),
@@ -30,7 +33,13 @@ vi.mock('@/lib/api/db', () => ({
 
 vi.mock('@/lib/auth/api-auth', () => ({
   withAuth: (handler: (req: NextRequest, ctx: unknown) => unknown) => (req: NextRequest) =>
-    handler(req, { user: { id: 'actor-1' }, orgId: 'org-1' }),
+    handler(req, {
+      user: { id: 'actor-1' },
+      orgId: 'org-1',
+      // The route now also gates on the department wall; grant org-wide sight
+      // so these tests exercise the reporting-manager rules only.
+      scope: { rank: 'super_admin', level: 100, departmentId: null, seeAllDepartments: true },
+    }),
   enforceOrgScope: mockEnforceOrgScope,
   requirePermission: mockRequirePermission,
   getUserRank: mockGetUserRank,
