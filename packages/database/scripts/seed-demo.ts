@@ -249,7 +249,11 @@ async function main() {
         // Converge assignment on re-run so an earlier partial seed is repaired.
         await db
           .update(schema.tasks)
-          .set({ assignedTo: userIdByEmail.get(t.assignee)!, assignedBy: creatorId })
+          .set({
+            assignedTo: userIdByEmail.get(t.assignee)!,
+            assignedBy: creatorId,
+            startDate: daysFromNow(t.due - 5),
+          })
           .where(eq(schema.tasks.id, existing.id));
         createdTaskIds.push(existing.id);
         continue;
@@ -268,6 +272,9 @@ async function main() {
           assignedTo: userIdByEmail.get(t.assignee)!,
           assignedBy: creatorId,
           createdBy: creatorId,
+          // Gantt draws a bar from startDate to dueDate; without a start the
+          // task row renders empty. Give each task a plausible 5-day window.
+          startDate: daysFromNow(t.due - 5),
           dueDate: daysFromNow(t.due),
         })
         .returning({ id: schema.tasks.id });
