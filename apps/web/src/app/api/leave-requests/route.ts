@@ -84,6 +84,15 @@ export const GET = withAuth(
       if (filters.userId) {
         conditions.push(eq(schema.leaveRequests.userId, filters.userId));
       }
+      // Date-range overlap: a leave intersects [from, to] when it starts on or
+      // before `to` and ends on or after `from`. Lets the calendar fetch only
+      // the visible window instead of the newest-100-by-createdAt slice.
+      if (filters.to) {
+        conditions.push(lte(schema.leaveRequests.startDate, filters.to));
+      }
+      if (filters.from) {
+        conditions.push(gte(schema.leaveRequests.endDate, filters.from));
+      }
 
       const requests = await db
         .select({

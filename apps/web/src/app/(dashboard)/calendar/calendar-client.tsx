@@ -21,6 +21,7 @@ import {
   Flag,
   Loader2,
   GripVertical,
+  Plane,
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,38 @@ export type Milestone = {
   dueDate: string | null;
   completedDate: string | null;
 };
+
+export type Leave = {
+  id: string;
+  userId: string;
+  startDate: string;
+  endDate: string;
+  isHalfDay: boolean;
+  user: { id: string; name: string | null } | null;
+  leaveType: { name: string | null; color: string | null } | null;
+};
+
+/**
+ * Expand each approved leave into a Map keyed by each covered day's
+ * `Date.toDateString()`, so a multi-day leave shows on every day it spans.
+ * Pure + exported for a focused unit test.
+ */
+export function leavesByDateFrom(leaves: Leave[]): Map<string, Leave[]> {
+  const map = new Map<string, Leave[]>();
+  for (const lv of leaves) {
+    // Dates are `YYYY-MM-DD`; parse as local midnight to avoid TZ drift.
+    const start = new Date(`${lv.startDate}T00:00:00`);
+    const end = new Date(`${lv.endDate}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) continue;
+    for (const cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
+      const key = cur.toDateString();
+      const arr = map.get(key);
+      if (arr) arr.push(lv);
+      else map.set(key, [lv]);
+    }
+  }
+  return map;
+}
 
 type ViewMode = 'month' | 'week';
 
@@ -210,6 +243,26 @@ function MilestoneBadge({ milestone, index }: { milestone: Milestone; index: num
       <Diamond className="h-2.5 w-2.5 shrink-0" style={{ color }} />
       <span className="text-surface-700 truncate max-w-[120px]">
         {milestone.name}
+      </span>
+    </span>
+  );
+}
+
+const LEAVE_DEFAULT_COLOR = '#0ea5e9';
+
+function LeaveBadge({ leave }: { leave: Leave }) {
+  const color = leave.leaveType?.color || LEAVE_DEFAULT_COLOR;
+  const who = leave.user?.name ?? 'Someone';
+  const type = leave.leaveType?.name ?? 'Leave';
+  return (
+    <span
+      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-left text-[10px] font-medium leading-tight"
+      style={{ backgroundColor: `${color}15` }}
+      title={`${who} — ${type}${leave.isHalfDay ? ' (half day)' : ''}`}
+    >
+      <Plane className="h-2.5 w-2.5 shrink-0" style={{ color }} />
+      <span className="text-surface-700 truncate max-w-[120px]">
+        {who}{leave.isHalfDay ? ' ½' : ''}
       </span>
     </span>
   );
@@ -585,12 +638,14 @@ function MonthView({
   today,
   tasksByDate,
   milestonesByDate,
+  leavesByDate,
 }: {
   year: number;
   month: number;
   today: Date;
   tasksByDate: Map<string, Task[]>;
   milestonesByDate: Map<string, Milestone[]>;
+  leavesByDate: Map<string, Leave[]>;
 }) {
   const { firstDay, daysInMonth } = getMonthStartEnd(year, month);
 
@@ -619,7 +674,8 @@ function MonthView({
         const dateKey = date.toDateString();
         const dayTasks = tasksByDate.get(dateKey) ?? [];
         const dayMilestones = milestonesByDate.get(dateKey) ?? [];
-        const totalItems = dayTasks.length + dayMilestones.length;
+        const dayLeaves = leavesByDate.get(dateKey) ?? [];
+        const totalItems = dayTasks.length + dayMilestones.length + dayLeaves.length;
 
         return (
           <DroppableDayCell key={day} date={date} isToday={isToday}>
@@ -641,41 +697,44 @@ function MonthView({
               )}
             </div>
             <div className="space-y-0.5">
-              {/* Milestones first */}
-              {dayMilestones.map((m, idx) => (
-                <Popover key={m.id}>
-                  <PopoverTrigger asChild>
-                    <button className="w-full text-left">
-                      <MilestoneBadge milestone={m} index={idx} />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    side="right"
-                    align="start"
-                    sideOffset={8}
-                    className="overflow-visible border-0 bg-transparent p-0 shadow-none"
-                  >
-                    <MilestonePopoverContent
-                      milestone={m}
-                      index={idx}
-                      onClose={() => {}}
-                    />
-                  </PopoverContent>
-                </Popover>
-              ))}
-              {/* Tasks after milestones */}
+              {/* Unified 3-slot budget across leave → milestones → tasks so a
+                  busy day never overflows; one "+N more" covers all hidden. */}
               {(() => {
-                const maxSlots = 3 - dayMilestones.length;
-                const visibleTasks = dayTasks.slice(0, Math.max(0, maxSlots));
-                const remaining = dayTasks.length - Math.max(0, maxSlots);
+                const CAP = 3;
+                const visibleLeaves = dayLeaves.slice(0, CAP);
+                const afterLeaves = CAP - visibleLeaves.length;
+                const visibleMilestones = dayMilestones.slice(0, afterLeaves);
+                const afterMilestones = afterLeaves - visibleMilestones.length;
+                const visibleTasks = dayTasks.slice(0, afterMilestones);
+                const hidden = totalItems - visibleLeaves.length - visibleMilestones.length - visibleTasks.length;
                 return (
                   <>
+                    {visibleLeaves.map((lv) => (
+                      <LeaveBadge key={`lv-${lv.id}`} leave={lv} />
+                    ))}
+                    {visibleMilestones.map((m, idx) => (
+                      <Popover key={m.id}>
+                        <PopoverTrigger asChild>
+                          <button className="w-full text-left">
+                            <MilestoneBadge milestone={m} index={idx} />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="right"
+                          align="start"
+                          sideOffset={8}
+                          className="overflow-visible border-0 bg-transparent p-0 shadow-none"
+                        >
+                          <MilestonePopoverContent milestone={m} index={idx} onClose={() => {}} />
+                        </PopoverContent>
+                      </Popover>
+                    ))}
                     {visibleTasks.map((t) => (
                       <DraggableTaskItem key={t.id} task={t} />
                     ))}
-                    {remaining > 0 && (
+                    {hidden > 0 && (
                       <p className="text-surface-400 px-1 text-[9px] font-medium">
-                        +{remaining} more
+                        +{hidden} more
                       </p>
                     )}
                   </>
@@ -694,11 +753,13 @@ function WeekView({
   today,
   tasksByDate,
   milestonesByDate,
+  leavesByDate,
 }: {
   weekDays: Date[];
   today: Date;
   tasksByDate: Map<string, Task[]>;
   milestonesByDate: Map<string, Milestone[]>;
+  leavesByDate: Map<string, Leave[]>;
 }) {
   const maxItemsPerDay = useMemo(() => {
     let max = 0;
@@ -706,10 +767,11 @@ function WeekView({
       const key = d.toDateString();
       const tasks = tasksByDate.get(key) ?? [];
       const milestones = milestonesByDate.get(key) ?? [];
-      max = Math.max(max, tasks.length + milestones.length);
+      const leaves = leavesByDate.get(key) ?? [];
+      max = Math.max(max, tasks.length + milestones.length + leaves.length);
     });
     return max;
-  }, [weekDays, tasksByDate, milestonesByDate]);
+  }, [weekDays, tasksByDate, milestonesByDate, leavesByDate]);
 
   return (
     <div className="border-surface-300/20 grid grid-cols-7 border-l border-t">
@@ -748,7 +810,8 @@ function WeekView({
               const key = d.toDateString();
               const tasks = tasksByDate.get(key) ?? [];
               const milestones = milestonesByDate.get(key) ?? [];
-              const allItems = [...milestones, ...tasks];
+              const leaves = leavesByDate.get(key) ?? [];
+              const allItems = [...leaves, ...milestones, ...tasks];
               const item = allItems[rowIdx];
               return (
                 <DroppableDayCell
@@ -757,7 +820,9 @@ function WeekView({
                   isToday={isSameDay(d, today)}
                   compact
                 >
-                  {item && 'projectName' in item ? (
+                  {item && 'leaveType' in item ? (
+                    <LeaveBadge key={`lv-${rowIdx}-${dayIdx}-${item.id}`} leave={item as Leave} />
+                  ) : item && 'projectName' in item ? (
                     <Popover key={`ms-${rowIdx}-${dayIdx}-${item.id}`}>
                       <PopoverTrigger asChild>
                         <button className="w-full text-left">
@@ -809,6 +874,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
   const [hadInitialData] = useState(() => initialTasks !== null);
   const [tasks, setTasks] = useState<Task[]>(initialTasks ?? []);
   const [milestones, setMilestones] = useState<Milestone[]>(initialMilestones);
+  const [leaves, setLeaves] = useState<Leave[]>([]);
   const [loading, setLoading] = useState(initialTasks === null);
   // Seed the current month from the server clock so SSR and first hydration render
   // the same grid; user navigation (prev/next) drives it from there.
@@ -840,6 +906,25 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [hadInitialData]);
+
+  // Approved leave is never server-seeded — fetch the visible window on mount
+  // and whenever the viewed month changes. A ±1 month buffer covers the grid's
+  // leading/trailing days and week view near month edges. Failure leaves the
+  // overlay empty (non-blocking).
+  useEffect(() => {
+    const y = currentDate.getFullYear();
+    const m = currentDate.getMonth();
+    const from = new Date(y, m - 1, 1).toISOString().slice(0, 10);
+    const to = new Date(y, m + 2, 0).toISOString().slice(0, 10); // last day of m+1
+    const controller = new AbortController();
+    fetch(`/api/leave-requests?status=approved&from=${from}&to=${to}&limit=200`, {
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((data) => setLeaves(data.requests ?? []))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [currentDate]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -918,9 +1003,11 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
     return map;
   }, [milestones]);
 
+  const leavesByDate = useMemo(() => leavesByDateFrom(leaves), [leaves]);
+
   const hasItemsOnCalendar = useMemo(
-    () => tasks.some((t) => t.dueDate) || milestones.some((m) => m.dueDate),
-    [tasks, milestones],
+    () => tasks.some((t) => t.dueDate) || milestones.some((m) => m.dueDate) || leaves.length > 0,
+    [tasks, milestones, leaves],
   );
 
   const milestoneCount = useMemo(
@@ -1050,7 +1137,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
             Calendar
           </h1>
           <p className="text-surface-500 mt-0.5 text-sm">
-            Task deadlines and milestones
+            Task deadlines, milestones, and approved leave
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1208,6 +1295,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
                         today={today}
                         tasksByDate={tasksByDate}
                         milestonesByDate={milestonesByDate}
+                        leavesByDate={leavesByDate}
                       />
                     ) : (
                       <WeekView
@@ -1215,6 +1303,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
                         today={today}
                         tasksByDate={tasksByDate}
                         milestonesByDate={milestonesByDate}
+                        leavesByDate={leavesByDate}
                       />
                     )}
                   </motion.div>
@@ -1252,6 +1341,15 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
                   <span className="flex items-center gap-1.5 text-[10px] text-violet-500 font-medium">
                     <Diamond className="h-2.5 w-2.5" />
                     {milestoneCount} milestone{milestoneCount !== 1 ? 's' : ''}
+                  </span>
+                </>
+              )}
+              {leaves.length > 0 && (
+                <>
+                  <span className="text-surface-300 text-[10px]">·</span>
+                  <span className="flex items-center gap-1.5 text-[10px] font-medium" style={{ color: LEAVE_DEFAULT_COLOR }}>
+                    <Plane className="h-2.5 w-2.5" />
+                    Approved leave
                   </span>
                 </>
               )}
