@@ -27,6 +27,7 @@ export type Team = {
   code: string | null;
   description: string | null;
   leadUserId: string | null;
+  leadUserName?: string | null;
   departmentId: string | null;
   isActive: boolean;
   createdAt: string;
@@ -424,8 +425,13 @@ export function TeamsClient({ initialData }: TeamsClientProps) {
                       <p className="text-surface-500 mb-2 line-clamp-2 text-sm">{team.description}</p>
                     )}
                     <div className="text-surface-500 flex items-center gap-3 text-xs">
-                      {team.leadUserId && <span>Lead: {team.leadUserId.substring(0, 8)}...</span>}
-                      {team.departmentId && <span>Dept: {team.departmentId.substring(0, 8)}...</span>}
+                      {team.leadUserId && <span>Lead: {team.leadUserName ?? 'Unknown'}</span>}
+                      {team.departmentId && (
+                        <span>
+                          Dept:{' '}
+                          {departments.find((d) => d.id === team.departmentId)?.name ?? 'Unknown'}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-3">
                       <Badge variant={team.isActive ? 'success' : 'default'} size="sm">

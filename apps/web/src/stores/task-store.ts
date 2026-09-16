@@ -13,6 +13,7 @@ export type Task = {
   status: string;
   priority: string;
   assignedTo: string | null;
+  assignedToName?: string | null;
   projectId: string | null;
   departmentId: string | null;
   teamId: string | null;

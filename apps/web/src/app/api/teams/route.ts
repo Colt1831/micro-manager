@@ -21,11 +21,16 @@ export const GET = withAuth(
       // Department wall: GM+/super_admin see all teams; others only their own dept's.
       applyDeptScope(teamConditions, scope, schema.teams.departmentId);
 
-      const teams = await db()
-        .select()
+      // Join the lead user so the UI can show a name. Without this the teams
+      // list only had leadUserId and rendered a truncated raw UUID.
+      const teamRows = await db()
+        .select({ team: schema.teams, leadUserName: schema.users.name })
         .from(schema.teams)
+        .leftJoin(schema.users, eq(schema.users.id, schema.teams.leadUserId))
         .where(and(...teamConditions))
         .orderBy(desc(schema.teams.createdAt));
+
+      const teams = teamRows.map((r) => ({ ...r.team, leadUserName: r.leadUserName }));
 
       const departments = await db()
         .select()

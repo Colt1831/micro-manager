@@ -3,10 +3,11 @@ import { NextResponse } from 'next/server';
 import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
-import { eq, desc, and, isNull } from 'drizzle-orm';
+import { eq, desc, and, isNull, inArray, sql } from 'drizzle-orm';
 import { ProjectCreateSchema, validationError } from '@/lib/api/validation';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { indexProject } from '@/lib/search';
+import { computeProgress } from './progress';
 
 export const runtime = 'nodejs';
 
@@ -29,13 +30,37 @@ export const GET = withAuth(
       applyDeptScope(conditions, scope, schema.projects.departmentId);
       if (status) conditions.push(eq(schema.projects.status, status));
 
-      const projects = await db()
+      const rows = await db()
         .select()
         .from(schema.projects)
         .where(and(...conditions))
         .orderBy(desc(schema.projects.createdAt))
         .limit(limit)
         .offset(offset);
+
+      // projects.progress is a stored column nothing ever writes, so the list
+      // always showed 0% while the detail route computed the real number from
+      // task counts. Derive it here too, in one grouped query for the page.
+      const projectIds = rows.map((p) => p.id);
+      const counts = projectIds.length
+        ? await db()
+            .select({
+              projectId: schema.tasks.projectId,
+              total: sql<number>`COUNT(*)::int`.as('total'),
+              completed: sql<number>`COUNT(*) FILTER (WHERE ${schema.tasks.status} = 'completed')::int`.as(
+                'completed',
+              ),
+            })
+            .from(schema.tasks)
+            .where(and(inArray(schema.tasks.projectId, projectIds), isNull(schema.tasks.deletedAt)))
+            .groupBy(schema.tasks.projectId)
+        : [];
+
+      const countByProject = new Map(counts.map((c) => [c.projectId, c]));
+      const projects = rows.map((p) => {
+        const c = countByProject.get(p.id);
+        return { ...p, progress: computeProgress(c?.total ?? 0, c?.completed ?? 0) };
+      });
 
       return NextResponse.json({ projects });
     } catch (error) {

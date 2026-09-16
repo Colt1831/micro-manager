@@ -56,14 +56,18 @@ async function createAdmin() {
   }
 
   // ─── Get admin role ────────────────────────────────────
+  // The bootstrap admin is the org's first account and must hold real
+  // authority: super_admin RANK (bypasses the department wall) AND the
+  // super_admin capability role. The plain 'admin' role alone left this
+  // user at the default 'executive' rank — powerless in a ranked org.
   const [adminRole] = await db
     .select({ id: schema.roles.id })
     .from(schema.roles)
-    .where(eq(schema.roles.slug, 'admin'))
+    .where(eq(schema.roles.slug, 'super_admin'))
     .limit(1);
 
   if (!adminRole) {
-    console.error('❌ No admin role found. Run db:seed first.');
+    console.error('❌ No super_admin role found. Run db:seed first.');
     process.exit(1);
   }
 
@@ -93,6 +97,7 @@ async function createAdmin() {
     organizationId: org.id,
     isActive: true,
     isSuspended: false,
+    rank: 'super_admin',
   });
   console.log(`  ✓ User created: ${email} (id: ${userId})`);
 

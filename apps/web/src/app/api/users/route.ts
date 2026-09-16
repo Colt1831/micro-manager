@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { randomBytes, randomUUID, scryptSync } from 'node:crypto';
 import { render } from '@react-email/components';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { sendEmail } from '@/lib/email';
@@ -27,7 +27,7 @@ function hashPassword(password: string): string {
 
 // GET /api/users - List users (org-scoped, rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'user:view');
 
@@ -42,6 +42,11 @@ export const GET = withAuth(
         isNull(schema.users.deletedAt),
         eq(schema.users.organizationId, orgId!),
       ];
+
+      // Department wall (spec §3): GM+/super_admin see every user; Manager and
+      // below only their own department. This list had no wall, so any manager
+      // could enumerate the whole org's people, emails and reporting lines.
+      applyDeptScope(filters, scope, schema.users.departmentId);
 
       if (departmentId) filters.push(eq(schema.users.departmentId, departmentId));
       if (teamId) filters.push(eq(schema.users.teamId, teamId));

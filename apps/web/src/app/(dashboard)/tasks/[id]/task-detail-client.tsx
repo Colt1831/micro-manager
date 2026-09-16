@@ -1030,7 +1030,7 @@ export function TaskDetailClient({
                 <div className="text-surface-300 flex items-center gap-2 text-sm">
                   <User className="text-surface-500 h-3.5 w-3.5" />
                   {task.assignedTo ? (
-                    <span className="font-mono text-xs">{task.assignedTo.substring(0, 12)}...</span>
+                    <span className="text-xs">{task.assignedToName ?? 'Unknown'}</span>
                   ) : (
                     <span className="text-surface-500">Unassigned</span>
                   )}
