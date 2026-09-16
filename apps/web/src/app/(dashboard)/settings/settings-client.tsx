@@ -47,6 +47,7 @@ import {
   type EODSettings,
 } from '@/components/settings/eod-schedule-settings';
 import { SlackSettings } from '@/components/settings/slack-settings';
+import { SecuritySettings } from '@/components/settings/security-settings';
 import { setMediaPrefs } from '@/lib/notification-media';
 import { useToast } from '@/hooks/use-toast';
 import { playNotificationChime, isNotificationSoundSupported } from '@/lib/notification-sound';
@@ -986,7 +987,7 @@ export function SettingsClient({ initialOrg = null }: { initialOrg?: Organizatio
                   <Shield className="text-surface-400 h-4 w-4" />
                   Security Settings
                 </h2>
-                <p className="text-surface-500 mt-2 text-sm">Security settings coming soon.</p>
+                <SecuritySettings />
               </div>
             </SectionCard>
           </motion.div>
