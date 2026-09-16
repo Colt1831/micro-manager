@@ -27,11 +27,16 @@ export const GET = withAuth(
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'task:view');
 
-      const [task] = await db()
-        .select()
+      // Join the assignee so the detail panel can show a name instead of the
+      // raw user id (same contract as the list route's assignedToName).
+      const [row] = await db()
+        .select({ task: schema.tasks, assignedToName: schema.users.name })
         .from(schema.tasks)
+        .leftJoin(schema.users, eq(schema.users.id, schema.tasks.assignedTo))
         .where(and(eq(schema.tasks.id, id), isNull(schema.tasks.deletedAt)))
         .limit(1);
+
+      const task = row ? { ...row.task, assignedToName: row.assignedToName } : undefined;
 
       if (!task) {
         return NextResponse.json(

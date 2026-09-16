@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-auth';
+import { computeProgress } from '../progress';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { ProjectUpdateSchema, validationError } from '@/lib/api/validation';
@@ -96,7 +97,9 @@ export const GET = withAuth(
       const overdueTasks = taskCounts.find((t) => t.status === 'overdue')?.count ?? 0;
 
       return NextResponse.json({
-        project,
+        // Derive progress from task counts, same as the list route. The stored
+        // projects.progress column is never written, so it always read 0%.
+        project: { ...project, progress: computeProgress(totalTasks, completedTasks) },
         taskStats: {
           total: totalTasks,
           completed: completedTasks,
