@@ -5,7 +5,7 @@ import { withAuth, enforceOrgScope, requirePermission, getUserRank } from '@/lib
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull } from 'drizzle-orm';
 import { canGrantRank, isRank } from '@workmanagement/shared';
-import { assertDepartmentSameOrg, assertTeamSameOrg } from '@/lib/api/cross-ref';
+import { assertDepartmentSameOrg, assertTeamSameOrg, assertUserSameOrg } from '@/lib/api/cross-ref';
 
 export const runtime = 'nodejs';
 
@@ -35,6 +35,7 @@ export const GET = withAuth(
           employmentStatus: schema.users.employmentStatus,
           departmentId: schema.users.departmentId,
           teamId: schema.users.teamId,
+          reportingManagerId: schema.users.reportingManagerId,
           location: schema.users.location,
           timezone: schema.users.timezone,
           organizationId: schema.users.organizationId,
@@ -81,6 +82,7 @@ export const PATCH = withAuth(
         location,
         timezone,
         rank,
+        reportingManagerId,
       } = body;
 
       // Fetch existing for org scope check
@@ -99,10 +101,11 @@ export const PATCH = withAuth(
 
       enforceOrgScope(existing.organizationId, orgId);
 
-      // Cross-tenant guards: replacement department/team must be same-org.
+      // Cross-tenant guards: replacement department/team/manager must be same-org.
       for (const denial of [
         departmentId != null ? await assertDepartmentSameOrg(departmentId, orgId) : null,
         teamId != null ? await assertTeamSameOrg(teamId, orgId) : null,
+        reportingManagerId != null ? await assertUserSameOrg(reportingManagerId, orgId) : null,
       ]) {
         if (denial) {
           return NextResponse.json(
@@ -110,6 +113,14 @@ export const PATCH = withAuth(
             { status: denial.status },
           );
         }
+      }
+
+      // A user cannot be their own reporting manager (would break the chain).
+      if (reportingManagerId != null && reportingManagerId === id) {
+        return NextResponse.json(
+          { error: { code: 'VALIDATION_ERROR', message: 'A user cannot report to themselves' } },
+          { status: 400 },
+        );
       }
 
       const updateData: Record<string, unknown> = { updatedAt: new Date() };
@@ -122,6 +133,7 @@ export const PATCH = withAuth(
       if (teamId !== undefined) updateData.teamId = teamId;
       if (location !== undefined) updateData.location = location;
       if (timezone !== undefined) updateData.timezone = timezone;
+      if (reportingManagerId !== undefined) updateData.reportingManagerId = reportingManagerId;
 
       // ── Rank change: downward-only, gated by the actor's own rank ──────
       // Changing a person's rank is authority-granting, so it is NOT covered

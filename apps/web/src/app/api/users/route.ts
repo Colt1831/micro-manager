@@ -68,6 +68,7 @@ export const GET = withAuth(
           designation: schema.users.designation,
           departmentId: schema.users.departmentId,
           teamId: schema.users.teamId,
+          reportingManagerId: schema.users.reportingManagerId,
           employmentStatus: schema.users.employmentStatus,
           isActive: schema.users.isActive,
           createdAt: schema.users.createdAt,
