@@ -31,6 +31,7 @@ export type UserRecord = {
   designation: string | null;
   departmentId: string | null;
   teamId: string | null;
+  reportingManagerId: string | null;
   employmentStatus: string;
   isActive: boolean;
   createdAt: string;
@@ -44,6 +45,12 @@ const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 100, damping: 15 } },
 } as const;
+
+/** Display label for a user: full name, else name, else email. */
+function userLabel(u: UserRecord): string {
+  if (u.firstName && u.lastName) return `${u.firstName} ${u.lastName}`;
+  return u.name ?? u.email;
+}
 
 interface UsersClientProps {
   /** Server-rendered users; null means the server load failed and the client should fetch. */
@@ -70,7 +77,7 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
 
   // Edit modal state (editUser === null means closed)
   const [editUser, setEditUser] = useState<UserRecord | null>(null);
-  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', designation: '' });
+  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', designation: '', reportingManagerId: '' });
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -97,6 +104,7 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
       firstName: user.firstName ?? '',
       lastName: user.lastName ?? '',
       designation: user.designation ?? '',
+      reportingManagerId: user.reportingManagerId ?? '',
     });
     setEditError(null);
   };
@@ -113,6 +121,7 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
           firstName: editForm.firstName.trim() || null,
           lastName: editForm.lastName.trim() || null,
           designation: editForm.designation.trim() || null,
+          reportingManagerId: editForm.reportingManagerId || null,
         }),
       });
       if (!res.ok) {
@@ -129,6 +138,7 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
                 firstName: editForm.firstName.trim() || null,
                 lastName: editForm.lastName.trim() || null,
                 designation: editForm.designation.trim() || null,
+                reportingManagerId: editForm.reportingManagerId || null,
               }
             : u,
         ),
@@ -532,6 +542,25 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
                     placeholder="e.g. Frontend Developer"
                     className="border-surface-300/30 bg-surface-100 focus:border-brand-500 focus:ring-brand-500/20 w-full rounded-xl border px-3 py-2.5 text-sm transition-all focus:outline-none focus:ring-2"
                   />
+                </div>
+                <div>
+                  <label className="text-surface-500 mb-1 block text-xs font-semibold uppercase tracking-wider">
+                    Reporting manager
+                  </label>
+                  <select
+                    value={editForm.reportingManagerId}
+                    onChange={(e) => setEditForm({ ...editForm, reportingManagerId: e.target.value })}
+                    className="border-surface-300/30 bg-surface-100 focus:border-brand-500 focus:ring-brand-500/20 w-full rounded-xl border px-3 py-2.5 text-sm transition-all focus:outline-none focus:ring-2"
+                  >
+                    <option value="">— None —</option>
+                    {users
+                      .filter((u) => u.id !== editUser.id && u.isActive)
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {userLabel(u)}
+                        </option>
+                      ))}
+                  </select>
                 </div>
                 {editError && (
                   <div className="bg-error/5 text-error flex items-center gap-2 rounded-xl px-3 py-2 text-sm">
