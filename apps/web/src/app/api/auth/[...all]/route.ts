@@ -100,6 +100,34 @@ async function assignNewUserToOrg(userId: string): Promise<void> {
   }
 }
 
+// ─── Login History Recording ────────────────────────────────────
+
+/**
+ * Record a successful sign-in in login_history. Fire-and-forget after a
+ * successful email/password sign-in — a logging failure must never break
+ * login, so everything is wrapped in try/catch (fail-open).
+ *
+ * IP is derived from x-forwarded-for / x-real-ip (via ipFromRequest); the
+ * ip_address column is a NOT NULL inet, so an unknown IP falls back to
+ * '0.0.0.0' rather than dropping the row on a constraint violation.
+ */
+async function recordLogin(userId: string, request: Request): Promise<void> {
+  try {
+    const db = getDb();
+    const ip = ipFromRequest(request);
+    await db.insert(schema.loginHistory).values({
+      userId,
+      ipAddress: ip === 'unknown' ? '0.0.0.0' : ip,
+      userAgent: request.headers.get('user-agent') ?? null,
+      loginMethod: 'email',
+      success: true,
+    });
+  } catch (err) {
+    // Best-effort only — never fail the login on a logging error.
+    logger.error({ err, userId }, '[auth] Failed to record login history');
+  }
+}
+
 // ─── Rate-limited Auth Handler ───────────────────────────────────
 
 /**
@@ -188,6 +216,7 @@ export async function POST(request: Request) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, '');
     const isSignUp = /\/auth\/register$/.test(path) || /\/sign-up\/email$/.test(path);
+    const isSignIn = /\/auth\/sign-in\/email$/.test(path) || /\/auth\/sign-in$/.test(path);
 
     if (isSignUp) {
       try {
@@ -195,6 +224,17 @@ export async function POST(request: Request) {
         if (body?.user?.id) {
           // Fire-and-forget — never block the auth response
           assignNewUserToOrg(body.user.id);
+        }
+      } catch {
+        // Response body may not be parseable (e.g. non-JSON)
+      }
+    } else if (isSignIn) {
+      // ── Record successful sign-in in login_history ────────
+      // Fire-and-forget — never block or fail the auth response.
+      try {
+        const body = await response.clone().json();
+        if (body?.user?.id) {
+          recordLogin(body.user.id, request);
         }
       } catch {
         // Response body may not be parseable (e.g. non-JSON)
