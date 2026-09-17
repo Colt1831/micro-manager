@@ -440,20 +440,17 @@
 }
 
 /* Neon card */
+/* Panel surface. Previously every card glowed violet on hover, including
+   static panels that were not clickable — the single loudest "cheap template"
+   tell in the app, and it fired on ~12 surfaces at once. A panel is now a
+   quiet, opaque container; interactive cards opt into feedback themselves. */
 .neon-card {
-  border: 1px solid rgb(var(--brand-rgb) / 0.06);
-  transition: all 0.3s ease;
-}
-.neon-card:hover {
-  border-color: rgb(var(--brand-rgb) / 0.25);
-  box-shadow: 0 0 16px rgb(var(--brand-rgb) / 0.08), inset 0 0 16px rgb(var(--brand-rgb) / 0.03);
+  border: 1px solid rgb(var(--brand-rgb) / 0.08);
+  background-color: var(--color-surface-200);
+  transition: border-color 0.15s ease;
 }
 :root:not(.dark) .neon-card {
   border-color: rgb(0 0 0 / 0.08);
-}
-:root:not(.dark) .neon-card:hover {
-  border-color: rgb(var(--brand-rgb) / 0.3);
-  box-shadow: 0 0 20px rgb(var(--brand-rgb) / 0.1);
 }
 
 /* Active neon indicator */

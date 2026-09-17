@@ -116,7 +116,6 @@ function MobileFabButton({ onClick }: { onClick: () => void }) {
       aria-label="Open menu"
     >
       <Menu className="h-5 w-5" />
-      <span className="animate-glow-pulse absolute inset-0 rounded-2xl" />
     </motion.button>
   );
 }
