@@ -641,7 +641,7 @@ export function TasksClient({ initialTasks, initialTotal, initialUsers }: TasksC
               <ClipboardList className="text-brand-500 h-4 w-4 sm:h-5 sm:w-5" />
             </div>
             <div>
-              <h1 className="text-surface-900 text-xl font-bold tracking-tight sm:text-2xl">
+              <h1 className="text-surface-950 text-[22px] font-semibold tracking-tight sm:text-2xl">
                 Tasks
               </h1>
               <p className="text-surface-500 mt-0.5 text-xs sm:text-sm">

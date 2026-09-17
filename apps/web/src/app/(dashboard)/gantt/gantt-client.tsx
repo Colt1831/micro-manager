@@ -353,7 +353,7 @@ export function GanttClient({
       {/* Header */}
       <motion.div variants={itemVariants} className="flex shrink-0 items-center justify-between">
         <div>
-          <h1 className="text-surface-900 flex items-center gap-2.5 text-2xl font-bold tracking-tight">
+          <h1 className="text-surface-950 flex items-center gap-2.5 text-[22px] font-semibold tracking-tight sm:text-2xl">
             <div className="bg-brand-500/15 flex h-8 w-8 items-center justify-center rounded-lg">
               <CalendarDays className="h-4 w-4 text-white" />
             </div>

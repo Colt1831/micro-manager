@@ -624,7 +624,7 @@ export function AutomationClient({ initialData }: AutomationClientProps) {
       {/* Header */}
       <motion.div variants={itemVariants} className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-surface-900 flex items-center gap-2.5 text-2xl font-bold tracking-tight">
+          <h1 className="text-surface-950 flex items-center gap-2.5 text-[22px] font-semibold tracking-tight sm:text-2xl">
             <div className="bg-brand-500/15 flex h-8 w-8 items-center justify-center rounded-lg">
               <Bot className="h-4 w-4 text-white" />
             </div>
