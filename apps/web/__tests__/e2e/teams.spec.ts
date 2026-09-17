@@ -87,8 +87,9 @@ test.describe('Teams Page', () => {
     await expect(page.getByText(/All engineering disciplines/i).first()).toBeVisible();
     await expect(page.getByText(/Testing and quality assurance/i).first()).toBeVisible();
 
-    // Active badge should show for departments
-    await expect(page.getByText('Active').first()).toBeVisible();
+    // Status badges flag only the exception. Every seeded department is active,
+    // so no badge should appear — a badge on every row carries no information.
+    await expect(page.getByText('Active', { exact: true })).toHaveCount(0);
   });
 
   test('renders teams section with team cards', async ({ page }) => {
