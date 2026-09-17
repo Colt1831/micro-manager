@@ -1,13 +1,25 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /**
+   * Opt in to hover feedback. Only set this when the whole card is a link or
+   * button — a static panel that lifts under the cursor promises an action it
+   * does not have, and the app reads as a demo when every surface reacts.
+   */
+  interactive?: boolean;
+}
+
+const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ className, interactive = false, ...props }, ref) => (
     <div
       ref={ref}
       className={cn(
-        'border-surface-700/15 bg-surface-200/50 text-surface-900 rounded-2xl border shadow-card backdrop-blur-md',
-        'hover:border-brand-500/25 hover:shadow-card-hover transition-all duration-300',
+        // Opaque surface: the translucent + backdrop-blur treatment muddied text
+        // over dense tables and cost a paint on every scroll.
+        'border-surface-700/15 bg-surface-200 text-surface-900 rounded-xl border shadow-card',
+        interactive &&
+          'hover:border-surface-700/30 hover:bg-surface-300/60 cursor-pointer transition-colors duration-150',
         className,
       )}
       {...props}

@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 
 export function Table({ className, children, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="neon-card overflow-hidden rounded-2xl">
+    <div className="border-surface-700/15 bg-surface-200 shadow-card overflow-hidden rounded-xl border">
       <div className="overflow-x-auto">
         <table className={cn('w-full text-sm', className)} {...props}>
           {children}
@@ -41,10 +41,12 @@ export function TR({ className, header, selected, ...props }: TRProps) {
     <tr
       className={cn(
         header
-          ? 'border-surface-500/20 bg-surface-300/40 border-b'
+          ? 'border-surface-500/25 bg-surface-300/50 border-b'
           : cn(
-              'border-surface-300/10 border-b transition-colors',
-              selected ? 'bg-brand-500/5' : 'hover:bg-surface-200/30',
+              // A 10%-alpha divider was effectively invisible, so rows ran
+              // together and the eye had nothing to track across a wide table.
+              'border-surface-700/12 border-b transition-colors duration-100',
+              selected ? 'bg-brand-500/10' : 'hover:bg-surface-300/40',
             ),
         className,
       )}
@@ -57,7 +59,7 @@ export function TH({ className, ...props }: React.ThHTMLAttributes<HTMLTableCell
   return (
     <th
       className={cn(
-        'text-surface-500 px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider sm:px-4 sm:py-3.5 sm:text-xs',
+        'text-surface-600 px-2 py-2 text-left text-[11px] font-medium uppercase tracking-wide sm:px-4 sm:py-2.5',
         className,
       )}
       {...props}
@@ -66,5 +68,7 @@ export function TH({ className, ...props }: React.ThHTMLAttributes<HTMLTableCell
 }
 
 export function TD({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('px-2 py-2.5 sm:px-4 sm:py-3.5', className)} {...props} />;
+  // Denser rows: an operator scanning 20+ tasks sees more per screen, and the
+  // page stops feeling padded out to fill space.
+  return <td className={cn('px-2 py-2 sm:px-4 sm:py-2.5', className)} {...props} />;
 }

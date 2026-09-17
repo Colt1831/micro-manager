@@ -619,7 +619,7 @@ export function TaskDetailClient({
               <span className="text-surface-600">/</span>
               <span className="font-mono">{task.taskIdDisplay}</span>
             </div>
-            <h1 className="font-display text-surface-900 text-2xl font-bold tracking-tight sm:text-[28px]">
+            <h1 className="text-surface-950 text-[22px] font-semibold tracking-tight sm:text-2xl">
               {task.title}
             </h1>
             <div className="mt-2.5 flex flex-wrap items-center gap-2">

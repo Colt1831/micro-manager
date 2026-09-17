@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { AccentBar } from '@/components/ui/accent-bar';
 
 /**
  * StatCard — the canonical KPI / metric tile: a glass card with a big Sora
@@ -43,29 +42,31 @@ export const StatCard = React.forwardRef<HTMLDivElement, StatCardProps>(
       <div
         ref={ref}
         className={cn(
-          'group relative overflow-hidden rounded-2xl border border-surface-700/15 bg-surface-200/50 p-4',
-          'shadow-card backdrop-blur-md transition-all duration-300',
-          'hover:border-brand-500/25 hover:shadow-card-hover',
+          // Opaque, calm chrome. A KPI strip is read at a glance: the numeral is
+          // the content, so the container stays quiet and does not react to the
+          // cursor (these are not clickable).
+          'group relative overflow-hidden rounded-xl border border-surface-700/15 bg-surface-200 p-4',
+          'shadow-card',
           className,
         )}
         {...props}
       >
-        {/* Top accent bar */}
-        <AccentBar color={color} />
         <div className="flex items-start justify-between gap-2">
-          <p className="text-surface-500 text-[10px] font-semibold uppercase tracking-wider">{label}</p>
+          <p className="text-surface-600 text-[11px] font-medium uppercase tracking-wide">{label}</p>
           {icon && (
             <div
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-              style={{ backgroundColor: tint('14%'), color }}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+              style={{ backgroundColor: tint('10%'), color }}
             >
               {icon}
             </div>
           )}
         </div>
 
-        <div className="mt-2 flex items-end gap-2">
-          <span className="stat-value text-surface-900 text-3xl">{value}</span>
+        <div className="mt-2.5 flex items-end gap-2">
+          <span className="stat-value text-surface-950 text-[32px] font-semibold leading-none tracking-tight">
+            {value}
+          </span>
           {(delta || trend === 'up' || trend === 'down') && (
             <span
               className={cn(

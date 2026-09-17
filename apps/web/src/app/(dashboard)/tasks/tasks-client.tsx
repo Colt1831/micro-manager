@@ -75,30 +75,35 @@ const statusColors: Record<
   archived: 'default',
 };
 
+/**
+ * Priority is an ORDERED scale, so it is rendered as a weighted ramp rather than
+ * five equally loud pills: low/medium recede to plain text, and only high and
+ * above spend colour. When every level shouts, the urgent rows stop standing out.
+ */
 const priorityBadge: Record<string, { label: string; color: string }> = {
   none: {
     label: 'None',
-    color: 'bg-surface-200/70 text-surface-500 ',
+    color: 'text-surface-500',
   },
   low: {
     label: 'Low',
-    color: 'bg-green-500/10 text-green-400 ',
+    color: 'text-surface-600',
   },
   medium: {
     label: 'Medium',
-    color: 'bg-amber-500/10 text-amber-400 ',
+    color: 'text-surface-700',
   },
   high: {
     label: 'High',
-    color: 'bg-orange-500/10 text-orange-400 ',
+    color: 'text-warning font-semibold',
   },
   urgent: {
     label: 'Urgent',
-    color: 'bg-red-500/10 text-red-400 ',
+    color: 'text-error font-semibold',
   },
   critical: {
     label: 'Critical',
-    color: 'bg-red-500/20 text-red-300 ',
+    color: 'bg-error text-white font-semibold px-1.5 py-0.5 rounded-md',
   },
 };
 
@@ -1278,9 +1283,8 @@ export function TasksClient({ initialTasks, initialTotal, initialUsers }: TasksC
                       <TD className="hidden sm:table-cell">
                         <span
                           className={cn(
-                            'inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium transition-transform duration-200 hover:scale-105 sm:px-2 sm:py-0.5 sm:text-xs',
-                            priorityBadge[task.priority]?.color ??
-                              'bg-surface-200/70 text-surface-500',
+                            'inline-flex items-center text-[11px] font-medium sm:text-xs',
+                            priorityBadge[task.priority]?.color ?? 'text-surface-500',
                           )}
                         >
                           {priorityBadge[task.priority]?.label ?? task.priority}
