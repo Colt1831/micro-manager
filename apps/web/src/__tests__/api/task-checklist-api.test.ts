@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createChain, createRequest, chain as getChain } from '@/__tests__/api/test-helpers';
+// The GET list routes resolve the parent task first (department wall), so those
+// chain queues start with that lookup before the rows under test.
+const TASK_ROW = [{ id: 'task-123', organizationId: 'org-1', departmentId: 'dept-1' }];
+
 
 // ═══════════════════════════════════════════════════════════════════
 // Hoisted mocks — these run before all imports
@@ -114,7 +118,7 @@ describe('Checklist API — GET (list items)', () => {
       },
     ];
 
-    mockDb.mockReturnValue(createChain([items]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, items]));
 
     const response = await GET(createRequest('GET', CHECKLIST_PATH));
 
@@ -126,7 +130,7 @@ describe('Checklist API — GET (list items)', () => {
   });
 
   it('returns empty array when no items exist', async () => {
-    mockDb.mockReturnValue(createChain([[]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, []]));
 
     const response = await GET(createRequest('GET', CHECKLIST_PATH));
 
@@ -135,7 +139,7 @@ describe('Checklist API — GET (list items)', () => {
   });
 
   it('calls requirePermission with task:view', async () => {
-    mockDb.mockReturnValue(createChain([[]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, []]));
 
     await GET(createRequest('GET', CHECKLIST_PATH));
 
@@ -471,6 +475,7 @@ describe('Checklist API — response contract', () => {
   it('GET returns expected shape with items array', async () => {
     mockDb.mockReturnValue(
       createChain([
+        TASK_ROW,
         [
           {
             id: 'item-1',
