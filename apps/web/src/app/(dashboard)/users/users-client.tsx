@@ -337,7 +337,7 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
                 className="border-surface-700/15 bg-surface-200 hover:border-surface-700/30 group relative overflow-hidden rounded-xl border p-4 transition-colors duration-150"
               >
                 <div className="flex items-start gap-3">
-                  <div className="bg-brand-500/15 text-brand-300 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold">
+                  <div className="bg-brand-500/25 text-brand-200 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold">
                     {(user.firstName?.[0] ?? user.name?.[0] ?? '?').toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
