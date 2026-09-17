@@ -280,6 +280,10 @@ async function seed() {
       'task:review',
       'task:close',
       'task:reopen',
+      'task_template:view',
+      'task_template:create',
+      'task_template:edit',
+      'task_template:delete',
       'milestone:view',
       'milestone:create',
       'milestone:edit',
@@ -327,6 +331,9 @@ async function seed() {
       'task:review',
       'task:close',
       'report:view',
+      'task_template:view',
+      'task_template:create',
+      'task_template:edit',
       'report:generate',
       'report:export',
       'time:manage',
@@ -359,6 +366,8 @@ async function seed() {
       'task:complete',
       'task:review',
       'report:view',
+      'task_template:view',
+      'task_template:create',
       'milestone:view',
     ],
   });
@@ -380,6 +389,7 @@ async function seed() {
       'task:change_status',
       'task:complete',
       'report:view',
+      'task_template:view',
       'milestone:view',
     ],
   });
@@ -411,6 +421,7 @@ async function seed() {
       'task:complete',
       'task:review',
       'report:view',
+      'task_template:view',
       'milestone:view',
     ],
   });
@@ -432,6 +443,7 @@ async function seed() {
       'task:change_status',
       'task:complete',
       'report:view',
+      'task_template:view',
       'milestone:view',
     ],
   });
