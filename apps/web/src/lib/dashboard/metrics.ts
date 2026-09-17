@@ -16,6 +16,7 @@ export interface MetricTask {
   dueDate?: string | null;
   updatedAt: string;
   assignedTo?: string | null;
+  assignedToName?: string | null;
 }
 
 export interface MetricProject {
@@ -96,7 +97,10 @@ export function computeDashboardMetrics(
   // Workload by user — top 8 users by task count
   const userTaskCount = new Map<string, { tasks: number; completed: number }>();
   for (const t of tasks) {
-    const assignee = t.assignedTo ?? 'Unassigned';
+    // Label by NAME — this string is rendered directly in the dashboard's
+    // Workload Overview. Keying on assignedTo alone printed raw uuids.
+    // Falls back to the id for legacy rows that carry no joined name.
+    const assignee = t.assignedToName ?? t.assignedTo ?? 'Unassigned';
     const entry = userTaskCount.get(assignee) ?? { tasks: 0, completed: 0 };
     entry.tasks++;
     if (isDone(t)) entry.completed++;

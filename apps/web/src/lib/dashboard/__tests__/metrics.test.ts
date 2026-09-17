@@ -12,6 +12,7 @@ function task(overrides: Partial<MetricTask>): MetricTask {
     updatedAt: overrides.updatedAt ?? NOW.toISOString(),
     dueDate: overrides.dueDate ?? null,
     assignedTo: overrides.assignedTo ?? null,
+    assignedToName: overrides.assignedToName ?? null,
   };
 }
 
@@ -76,6 +77,26 @@ describe('computeDashboardMetrics', () => {
     expect(m.workloadByUser[0]).toEqual({ name: 'u1', tasks: 3, completed: 3 });
     expect(m.workloadByUser.map((w) => w.name)).toContain('Unassigned');
     expect(m.workloadByUser.length).toBeLessThanOrEqual(8);
+  });
+
+  it('labels workload buckets with the assignee NAME, not the raw user id', () => {
+    // The dashboard renders workloadByUser[].name directly. Keying on
+    // assignedTo (a uuid) printed raw ids in the most visible panel of the app.
+    const tasks = [
+      task({ assignedTo: 'uuid-1', assignedToName: 'Dana Roy', status: 'completed' }),
+      task({ assignedTo: 'uuid-1', assignedToName: 'Dana Roy' }),
+      task({ assignedTo: 'uuid-2', assignedToName: 'Omar Naz' }),
+    ];
+    const m = computeDashboardMetrics(tasks, [], [], { myUserId: 'uuid-1', userName: 'Dana Roy', now: NOW });
+    expect(m.workloadByUser[0]).toEqual({ name: 'Dana Roy', tasks: 2, completed: 1 });
+    expect(m.workloadByUser.map((w) => w.name)).toContain('Omar Naz');
+    expect(m.workloadByUser.map((w) => w.name)).not.toContain('uuid-1');
+  });
+
+  it('falls back to the id when no name is present (legacy rows)', () => {
+    const tasks = [task({ assignedTo: 'u1', status: 'completed' })];
+    const m = computeDashboardMetrics(tasks, [], [], { myUserId: 'u1', userName: 'A', now: NOW });
+    expect(m.workloadByUser[0]!.name).toBe('u1');
   });
 
   it('precomputes upcoming deadlines with isUrgent + dueLabel (max 5, soonest first)', () => {
