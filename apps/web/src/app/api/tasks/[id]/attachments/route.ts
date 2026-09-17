@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
-import { eq, desc, and, isNull } from 'drizzle-orm';
+import { eq, desc, and, isNull , type SQL } from 'drizzle-orm';
 import { uploadFile, deleteFile, getPresignedDownloadUrl } from '@/lib/storage';
 import { MAX_FILE_SIZE, ALLOWED_MIME_TYPES, BLOCKED_EXTENSIONS } from '@/lib/api/validation';
 import { getTaskIdFromPath, checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
@@ -13,7 +13,7 @@ export const runtime = 'nodejs';
 
 // GET /api/tasks/[id]/attachments - List attachments for a task
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
 
@@ -40,9 +40,15 @@ export const GET = withAuth(
         .leftJoin(schema.users, eq(schema.taskAttachments.userId, schema.users.id))
         .where(
           and(
-            eq(schema.taskAttachments.taskId, taskId),
+            ...applyDeptScope(
+              [
+eq(schema.taskAttachments.taskId, taskId),
             isNull(schema.taskAttachments.deletedAt),
             eq(schema.tasks.organizationId, orgId!),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
           ),
         )
         .orderBy(desc(schema.taskAttachments.createdAt));
@@ -70,7 +76,7 @@ export const GET = withAuth(
 
 // POST /api/tasks/[id]/attachments - Upload a file attachment
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:edit');
@@ -123,6 +129,7 @@ export const POST = withAuth(
         .select({
           id: schema.tasks.id,
           organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
           status: schema.tasks.status,
         })
         .from(schema.tasks)
@@ -130,7 +137,7 @@ export const POST = withAuth(
         .limit(1);
 
       // Shared helper checks task existence + org scope
-      const accessError = checkTaskAccessOrRespond(task, orgId);
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
       if (accessError) return accessError;
 
       // Block attachments on archived tasks

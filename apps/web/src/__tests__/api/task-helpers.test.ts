@@ -328,3 +328,58 @@ describe('Route handler simulation (watchers/history)', () => {
     expect(checkTaskAccessOrRespond(undefined, 'org-1')?.status).toBe(404);
   });
 });
+
+// ─── Department wall ────────────────────────────────────────
+// A task sub-route (comments, history, watchers, ...) must be no more
+// permissive than the parent task read. /api/tasks/[id] walls a cross-department
+// task behind a 404, so checkTaskAccess must apply the same wall — otherwise a
+// walled user who is refused the task can still read and write its comments.
+
+describe('checkTaskAccess — department wall', () => {
+  const engTask: TaskAccessInfo = {
+    id: 'task-eng',
+    organizationId: 'org-1',
+    departmentId: 'dept-eng',
+  };
+
+  const gm = { seeAllDepartments: true, departmentId: null };
+  const salesManager = { seeAllDepartments: false, departmentId: 'dept-sales' };
+  const engManager = { seeAllDepartments: false, departmentId: 'dept-eng' };
+
+  it('allows a user in the same department', () => {
+    expect(checkTaskAccess(engTask, 'org-1', { scope: engManager }).ok).toBe(true);
+  });
+
+  it('allows GM+ (sees all departments)', () => {
+    expect(checkTaskAccess(engTask, 'org-1', { scope: gm }).ok).toBe(true);
+  });
+
+  it('refuses a walled user from another department', () => {
+    const result = checkTaskAccess(engTask, 'org-1', { scope: salesManager });
+    expect(result.ok).toBe(false);
+    // 404, matching /api/tasks/[id]: a cross-dept id must be indistinguishable
+    // from one that does not exist, or the wall leaks task existence.
+    expect(result.ok === false && result.error.status).toBe(404);
+  });
+
+  it('refuses a walled user with no department at all', () => {
+    const orphan = { seeAllDepartments: false, departmentId: null };
+    expect(checkTaskAccess(engTask, 'org-1', { scope: orphan }).ok).toBe(false);
+  });
+
+  it('refuses when the task itself has no department and the user is walled', () => {
+    const noDept: TaskAccessInfo = { id: 't', organizationId: 'org-1', departmentId: null };
+    expect(checkTaskAccess(noDept, 'org-1', { scope: salesManager }).ok).toBe(false);
+    expect(checkTaskAccess(noDept, 'org-1', { scope: gm }).ok).toBe(true);
+  });
+
+  it('stays backward compatible when no scope is supplied', () => {
+    expect(checkTaskAccess(engTask, 'org-1').ok).toBe(true);
+  });
+
+  it('checkTaskAccessOrRespond returns 404 for a cross-dept task', () => {
+    const res = checkTaskAccessOrRespond(engTask, 'org-1', { scope: salesManager });
+    expect(res?.status).toBe(404);
+    expect(checkTaskAccessOrRespond(engTask, 'org-1', { scope: engManager })).toBeNull();
+  });
+});

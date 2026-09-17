@@ -11,19 +11,23 @@ export const runtime = 'nodejs';
 
 // GET /api/tasks/[id]/watchers - List watchers for a task
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:view');
 
       // Verify task exists and belongs to org
       const [task] = await db()
-        .select({ id: schema.tasks.id, organizationId: schema.tasks.organizationId })
+        .select({
+          id: schema.tasks.id,
+          organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
+        })
         .from(schema.tasks)
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
         .limit(1);
 
-      const accessError = checkTaskAccessOrRespond(task, orgId);
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
       if (accessError) return accessError;
 
       // Fetch watchers with user info
@@ -59,18 +63,22 @@ export const GET = withAuth(
 
 // POST /api/tasks/[id]/watchers - Watch a task
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
 
       // Verify task exists and belongs to org
       const [task] = await db()
-        .select({ id: schema.tasks.id, organizationId: schema.tasks.organizationId })
+        .select({
+          id: schema.tasks.id,
+          organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
+        })
         .from(schema.tasks)
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
         .limit(1);
 
-      const accessError = checkTaskAccessOrRespond(task, orgId);
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
       if (accessError) return accessError;
 
       // Check if already watching
@@ -136,18 +144,22 @@ export const POST = withAuth(
 
 // DELETE /api/tasks/[id]/watchers - Unwatch a task
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
 
       // Verify task exists and belongs to org
       const [task] = await db()
-        .select({ id: schema.tasks.id, organizationId: schema.tasks.organizationId })
+        .select({
+          id: schema.tasks.id,
+          organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
+        })
         .from(schema.tasks)
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
         .limit(1);
 
-      const accessError = checkTaskAccessOrRespond(task ?? undefined, orgId);
+      const accessError = checkTaskAccessOrRespond(task ?? undefined, orgId, { scope });
       if (accessError) return accessError;
 
       const [existing] = await db()

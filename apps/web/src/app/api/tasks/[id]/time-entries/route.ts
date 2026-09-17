@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError, recalcTaskHours } from '@/lib/api/db';
+import { db, schema, handleApiError, recalcTaskHours, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
-import { eq, desc, and, isNull } from 'drizzle-orm';
+import { eq, desc, and, isNull , type SQL } from 'drizzle-orm';
 import { TimeEntryCreateSchema, validationError } from '@/lib/api/validation';
 import { getTaskIdFromPath, checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
 import { isUniqueViolation } from '@/lib/db-errors';
@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 
 // GET /api/tasks/[id]/time-entries — List time entries for a task
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
 
@@ -41,7 +41,17 @@ export const GET = withAuth(
         .from(schema.timeEntries)
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
         .leftJoin(schema.users, eq(schema.timeEntries.userId, schema.users.id))
-        .where(and(eq(schema.timeEntries.taskId, taskId), eq(schema.tasks.organizationId, orgId!)))
+        .where(
+          and(
+            ...applyDeptScope(
+              [
+eq(schema.timeEntries.taskId, taskId), eq(schema.tasks.organizationId, orgId!),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
+          ),
+        )
         .orderBy(desc(schema.timeEntries.startTime));
 
       return NextResponse.json({ entries });
@@ -55,7 +65,7 @@ export const GET = withAuth(
 
 // POST /api/tasks/[id]/time-entries — Start a timer or log manual time
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:edit');
@@ -74,6 +84,7 @@ export const POST = withAuth(
         .select({
           id: schema.tasks.id,
           organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
           status: schema.tasks.status,
         })
         .from(schema.tasks)
@@ -81,7 +92,7 @@ export const POST = withAuth(
         .limit(1);
 
       // Shared helper checks task existence + org scope
-      const accessError = checkTaskAccessOrRespond(task, orgId);
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
       if (accessError) return accessError;
 
       // Block time entries on archived/closed tasks
@@ -226,7 +237,7 @@ export const POST = withAuth(
 
 // PATCH /api/tasks/[id]/time-entries — Stop a running timer or update an existing entry
 export const PATCH = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       const entryId = request.nextUrl.searchParams.get('entryId');
@@ -253,9 +264,15 @@ export const PATCH = withAuth(
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
         .where(
           and(
-            eq(schema.timeEntries.id, entryId),
+            ...applyDeptScope(
+              [
+eq(schema.timeEntries.id, entryId),
             eq(schema.timeEntries.taskId, taskId),
             eq(schema.tasks.organizationId, orgId!),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
           ),
         )
         .limit(1);
@@ -412,7 +429,7 @@ export const PATCH = withAuth(
 
 // DELETE /api/tasks/[id]/time-entries — Delete a time entry
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       const entryId = request.nextUrl.searchParams.get('entryId');
@@ -433,9 +450,15 @@ export const DELETE = withAuth(
         .innerJoin(schema.tasks, eq(schema.timeEntries.taskId, schema.tasks.id))
         .where(
           and(
-            eq(schema.timeEntries.id, entryId),
+            ...applyDeptScope(
+              [
+eq(schema.timeEntries.id, entryId),
             eq(schema.timeEntries.taskId, taskId),
             eq(schema.tasks.organizationId, orgId!),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
           ),
         )
         .limit(1);
