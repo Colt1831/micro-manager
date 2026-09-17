@@ -1266,10 +1266,10 @@ export function TasksClient({ initialTasks, initialTotal, initialUsers }: TasksC
                           {task.taskIdDisplay}
                         </Link>
                       </TD>
-                      <TD>
+                      <TD className="w-full max-w-0">
                         <Link
                           href={`/tasks/${task.id}`}
-                          className="text-surface-900 hover:text-brand-500 inline-block text-xs font-medium transition-all duration-200 group-hover:translate-x-0.5 sm:text-sm"
+                          className="text-surface-900 hover:text-brand-500 block text-xs font-medium transition-colors duration-150 sm:text-sm"
                         >
                           <span className="line-clamp-1">{task.title}</span>
                           <span className="absolute inset-0" aria-hidden="true" />
@@ -1335,7 +1335,7 @@ export function TasksClient({ initialTasks, initialTotal, initialUsers }: TasksC
                           </TD>
                           <TD
                             className={cn(
-                              'text-[10px] sm:text-xs',
+                              'whitespace-nowrap text-[10px] sm:text-xs',
                               task.dueDate &&
                                 new Date(task.dueDate) < new Date() &&
                                 !['completed', 'closed', 'cancelled'].includes(task.status)
