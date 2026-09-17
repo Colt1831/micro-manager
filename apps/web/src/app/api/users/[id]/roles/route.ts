@@ -1,11 +1,40 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
+
+/**
+ * Department wall for role operations: resolve the target user and refuse a
+ * walled caller who is outside their department. Returns a response to send,
+ * or null to continue. 404 (not 403) matches the sibling user routes so a
+ * cross-department id is indistinguishable from one that does not exist.
+ */
+async function denyIfOutsideDept(
+  userId: string,
+  orgId: string | null | undefined,
+  scope: Parameters<typeof canAccessDept>[0],
+): Promise<NextResponse | null> {
+  const [target] = await db()
+    .select({
+      organizationId: schema.users.organizationId,
+      departmentId: schema.users.departmentId,
+    })
+    .from(schema.users)
+    .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)))
+    .limit(1);
+
+  if (!target || target.organizationId !== orgId || !canAccessDept(scope, target.departmentId)) {
+    return NextResponse.json(
+      { error: { code: 'NOT_FOUND', message: 'User not found' } },
+      { status: 404 },
+    );
+  }
+  return null;
+}
 
 /**
  * The caller's highest capability-role priority — their grant ceiling.
@@ -37,11 +66,14 @@ function getUserIdFromPath(request: NextRequest): string {
 
 // GET /api/users/[id]/roles - Get roles assigned to a user (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'role:view');
 
       const userId = getUserIdFromPath(request);
+
+      const denied = await denyIfOutsideDept(userId, orgId, scope);
+      if (denied) return denied;
 
       const userRoles = await db()
         .select({
@@ -78,7 +110,7 @@ export const GET = withAuth(
 
 // POST /api/users/[id]/roles - Assign a role to a user (rate limited: 30 req/min per user — sensitive)
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'role:assign');
 
@@ -118,7 +150,11 @@ export const POST = withAuth(
       // only the role's org was checked, letting a role be pinned onto a user
       // in another org).
       const [targetUser] = await db()
-        .select({ id: schema.users.id, organizationId: schema.users.organizationId })
+        .select({
+          id: schema.users.id,
+          organizationId: schema.users.organizationId,
+          departmentId: schema.users.departmentId,
+        })
         .from(schema.users)
         .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)))
         .limit(1);
@@ -133,6 +169,17 @@ export const POST = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Cross-organization role assignment denied' } },
           { status: 403 },
+        );
+      }
+
+      // Department wall: a walled user must not grant roles to someone in
+      // another department. The grant ceiling below limits WHICH role may be
+      // assigned, not WHO it may be assigned to — without this a sales manager
+      // can alter an engineering user's permissions.
+      if (!canAccessDept(scope, targetUser.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'User not found' } },
+          { status: 404 },
         );
       }
 
@@ -202,12 +249,15 @@ export const POST = withAuth(
 
 // DELETE /api/users/[id]/roles - Remove a role from a user (rate limited: 30 req/min per user — sensitive)
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       await requirePermission(user.id, 'role:assign');
 
       const userId = getUserIdFromPath(request);
       const roleId = request.nextUrl.searchParams.get('roleId');
+
+      const denied = await denyIfOutsideDept(userId, orgId, scope);
+      if (denied) return denied;
 
       if (!roleId) {
         return NextResponse.json(

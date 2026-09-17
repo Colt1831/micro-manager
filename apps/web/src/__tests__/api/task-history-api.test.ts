@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createChain, createRequest } from '@/__tests__/api/test-helpers';
+// The GET list routes resolve the parent task first (department wall), so those
+// chain queues start with that lookup before the rows under test.
+const TASK_ROW = [{ id: 'task-123', organizationId: 'org-1', departmentId: 'dept-1' }];
+
 
 // ═══════════════════════════════════════════════════════════════════
 // Hoisted mocks — these run before all imports
@@ -75,6 +79,9 @@ vi.mock('@/lib/api/db', () => ({
 
 vi.mock('@/lib/api/task-helpers', () => ({
   getTaskIdFromPath: mockGetTaskIdFromPath,
+  // The wall itself is covered in task-helpers.test.ts; here it always allows
+  // so these tests keep asserting the query/response contract.
+  checkTaskAccessOrRespond: vi.fn(() => null),
 }));
 
 // ═══════════════════════════════════════════════════════════════════
@@ -122,7 +129,7 @@ describe('History API — GET (list history)', () => {
       },
     ];
 
-    const chain = createChain([history]);
+    const chain = createChain([TASK_ROW, history]);
     mockDb.mockReturnValue(chain);
 
     const response = await GET(createRequest('GET', HISTORY_PATH));
@@ -141,7 +148,7 @@ describe('History API — GET (list history)', () => {
   });
 
   it('returns empty array when no history exists', async () => {
-    mockDb.mockReturnValue(createChain([[]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, []]));
 
     const response = await GET(createRequest('GET', HISTORY_PATH));
 
@@ -150,7 +157,7 @@ describe('History API — GET (list history)', () => {
   });
 
   it('calls requirePermission with task:view', async () => {
-    mockDb.mockReturnValue(createChain([[]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, []]));
 
     await GET(createRequest('GET', HISTORY_PATH));
 
@@ -160,7 +167,7 @@ describe('History API — GET (list history)', () => {
   it('returns empty history when task is not in org scope (innerJoin returns nothing)', async () => {
     // The route uses a single query with innerJoin; if no task matches the
     // org/deleted scope, the query returns empty (not a 404 explicitly).
-    mockDb.mockReturnValue(createChain([[]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, []]));
 
     const response = await GET(createRequest('GET', HISTORY_PATH));
 
@@ -185,7 +192,7 @@ describe('History API — GET (list history)', () => {
       user: { id: 'user-1', name: 'Alice Johnson', avatarUrl: null },
     }));
 
-    mockDb.mockReturnValue(createChain([entries]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, entries]));
 
     await GET(createRequest('GET', HISTORY_PATH));
 
@@ -197,7 +204,7 @@ describe('History API — GET (list history)', () => {
   });
 
   it('returns entries ordered by createdAt descending with limit 100', async () => {
-    const chain = createChain([[]]);
+    const chain = createChain([TASK_ROW, []]);
     mockDb.mockReturnValue(chain);
 
     await GET(createRequest('GET', HISTORY_PATH));
@@ -226,7 +233,7 @@ describe('History API — response contract', () => {
       user: { id: 'user-1', name: 'Alice Johnson', avatarUrl: null },
     };
 
-    mockDb.mockReturnValue(createChain([[entry]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, [entry]]));
 
     await GET(createRequest('GET', HISTORY_PATH));
 
@@ -268,7 +275,7 @@ describe('History API — response contract', () => {
       user: null,
     };
 
-    mockDb.mockReturnValue(createChain([[entry]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, [entry]]));
 
     await GET(createRequest('GET', HISTORY_PATH));
 
@@ -293,7 +300,7 @@ describe('History API — response contract', () => {
       user: { id: 'user-1', name: 'Alice', avatarUrl: null },
     };
 
-    mockDb.mockReturnValue(createChain([[entry]]));
+    mockDb.mockReturnValue(createChain([TASK_ROW, [entry]]));
 
     await GET(createRequest('GET', HISTORY_PATH));
 

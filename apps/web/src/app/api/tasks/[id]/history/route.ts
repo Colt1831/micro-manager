@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { eq, desc, and, isNull, type SQL } from 'drizzle-orm';
-import { getTaskIdFromPath } from '@/lib/api/task-helpers';
+import { getTaskIdFromPath, checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
 
 export const runtime = 'nodejs';
 
@@ -13,6 +13,22 @@ export const GET = withAuth(
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:view');
+
+      // Wall first: a cross-department task must 404 here exactly as it does on
+      // /api/tasks/[id]. Scoping only the list query would answer 200 with an
+      // empty array, which still confirms the id exists.
+      const [parentTask] = await db()
+        .select({
+          id: schema.tasks.id,
+          organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
+        })
+        .from(schema.tasks)
+        .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
+        .limit(1);
+
+      const accessError = checkTaskAccessOrRespond(parentTask, orgId, { scope });
+      if (accessError) return accessError;
 
       const history = await db()
         .select({

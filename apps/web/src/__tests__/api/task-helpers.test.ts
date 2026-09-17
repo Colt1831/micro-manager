@@ -383,3 +383,38 @@ describe('checkTaskAccess — department wall', () => {
     expect(checkTaskAccessOrRespond(engTask, 'org-1', { scope: engManager })).toBeNull();
   });
 });
+
+// ─── Wall consistency across a resource and its sub-routes ──
+// Regression guard for the class fixed in PR #28 and after: a sub-route or a
+// related-resource route must never be more permissive than the parent read.
+// These assert the SHAPE every caller relies on, so a future route that passes
+// a scope gets the same 404 the parent gives.
+
+describe('checkTaskAccess — parity with the parent route', () => {
+  const engTask: TaskAccessInfo = {
+    id: 'task-eng',
+    organizationId: 'org-1',
+    departmentId: 'dept-eng',
+  };
+  const sales = { seeAllDepartments: false, departmentId: 'dept-sales' };
+
+  it('refuses with 404, never 403, so the status is not an existence oracle', () => {
+    const result = checkTaskAccess(engTask, 'org-1', { scope: sales });
+    expect(result.ok).toBe(false);
+    // 403 would confirm the task exists; the parent route answers 404.
+    expect(result.ok === false && result.error.status).toBe(404);
+    expect(result.ok === false && result.error.code).toBe('NOT_FOUND');
+  });
+
+  it('still refuses a cross-ORG task with 403 (org mismatch is not the wall)', () => {
+    const result = checkTaskAccess(engTask, 'org-2', { scope: sales });
+    expect(result.ok === false && result.error.status).toBe(403);
+  });
+
+  it('applies the org check before the department check', () => {
+    // A task in another org must not be reported as merely cross-department.
+    const other = { seeAllDepartments: false, departmentId: 'dept-eng' };
+    const result = checkTaskAccess(engTask, 'org-2', { scope: other });
+    expect(result.ok === false && result.error.code).toBe('FORBIDDEN');
+  });
+});

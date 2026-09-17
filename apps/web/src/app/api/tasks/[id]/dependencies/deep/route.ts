@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { eq, and, isNull } from 'drizzle-orm';
 import { getTaskIdFromPath } from '@/lib/api/task-helpers';
@@ -209,7 +209,7 @@ async function traverseDownstream(
 // ─── GET ─────────────────────────────────────────────────────
 
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:view');
@@ -223,6 +223,7 @@ export const GET = withAuth(
           taskIdDisplay: schema.tasks.taskIdDisplay,
           status: schema.tasks.status,
           priority: schema.tasks.priority,
+          departmentId: schema.tasks.departmentId,
         })
         .from(schema.tasks)
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
@@ -239,6 +240,16 @@ export const GET = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Access denied' } },
           { status: 403 },
+        );
+      }
+
+      // Department wall: the graph walk fans out from this root, so a walled
+      // caller outside its department must be refused here — otherwise the
+      // traversal leaks the titles and structure of another dept's work.
+      if (!canAccessDept(scope, rootTask.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Task not found' } },
+          { status: 404 },
         );
       }
 

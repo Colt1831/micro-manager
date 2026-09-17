@@ -19,6 +19,22 @@ export const GET = withAuth(
 
       await requirePermission(user.id, 'task:view');
 
+      // Wall first: a cross-department task must 404 here exactly as it does on
+      // /api/tasks/[id]. Scoping only the list query would answer 200 with an
+      // empty array, which still confirms the id exists.
+      const [parentTask] = await db()
+        .select({
+          id: schema.tasks.id,
+          organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
+        })
+        .from(schema.tasks)
+        .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
+        .limit(1);
+
+      const accessError = checkTaskAccessOrRespond(parentTask, orgId, { scope });
+      if (accessError) return accessError;
+
       const attachments = await db()
         .select({
           id: schema.taskAttachments.id,
