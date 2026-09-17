@@ -238,7 +238,6 @@ function StatCard({
 
   return (
     <motion.div
-      whileHover={{ y: -2 }}
       className="neon-card group relative overflow-hidden rounded-xl p-4 transition-all duration-200"
     >
       <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${color} opacity-60`} />

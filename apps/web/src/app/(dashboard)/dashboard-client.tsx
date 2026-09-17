@@ -308,7 +308,7 @@ export function DashboardClient({ initialMetrics, initialUserName }: DashboardCl
       )}>
         {kpis.map((kpi, i) => (
           <motion.div key={kpi.label} variants={itemVariants} custom={i}>
-            <motion.div whileHover={{ y: -3 }} className="h-full">
+            <motion.div className="h-full">
               <StatCard
                 label={kpi.label}
                 value={kpi.value}
