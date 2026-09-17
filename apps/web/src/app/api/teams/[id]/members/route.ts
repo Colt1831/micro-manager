@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { isUniqueViolation } from '@/lib/db-errors';
@@ -17,7 +17,7 @@ function getIdsFromPath(request: NextRequest): { teamId: string } {
 
 // POST /api/teams/[id]/members - Add a member to the team (rate limited: 30 req/min per user)
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const { teamId } = getIdsFromPath(request);
       await requirePermission(user.id, 'team:manage');
@@ -49,6 +49,15 @@ export const POST = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Access denied' } },
           { status: 403 },
+        );
+      }
+
+      // Department wall: a walled user must not alter another department's team.
+      // 404 so a cross-dept team id is indistinguishable from a missing one.
+      if (!canAccessDept(scope, team.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Team not found' } },
+          { status: 404 },
         );
       }
 
@@ -170,7 +179,7 @@ export const POST = withAuth(
 
 // DELETE /api/teams/[id]/members - Remove a member from the team (rate limited: 60 req/min per user)
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const { teamId } = getIdsFromPath(request);
       await requirePermission(user.id, 'team:manage');
@@ -189,6 +198,7 @@ export const DELETE = withAuth(
         .select({
           id: schema.teams.id,
           organizationId: schema.teams.organizationId,
+          departmentId: schema.teams.departmentId,
           leadUserId: schema.teams.leadUserId,
         })
         .from(schema.teams)
@@ -206,6 +216,14 @@ export const DELETE = withAuth(
         return NextResponse.json(
           { error: { code: 'FORBIDDEN', message: 'Access denied' } },
           { status: 403 },
+        );
+      }
+
+      // Department wall (see POST).
+      if (!canAccessDept(scope, team.departmentId)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Team not found' } },
+          { status: 404 },
         );
       }
 

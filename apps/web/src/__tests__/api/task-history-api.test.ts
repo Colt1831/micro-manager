@@ -64,6 +64,9 @@ vi.mock('@/lib/api/db', () => ({
       string
     >,
   },
+  // The wall is exercised in task-helpers.test.ts; here it is a pass-through
+  // so these tests keep asserting the query/response contract.
+  applyDeptScope: vi.fn((conditions: unknown[]) => conditions),
   handleApiError: vi.fn((_error: unknown, message: string) => ({
     error: { code: 'INTERNAL_ERROR', message },
     status: 500,

@@ -15,11 +15,26 @@ export const runtime = 'nodejs';
 
 // GET /api/tasks/[id]/comments - List comments for a task (rate limited: 100 req/min per user)
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
 
       await requirePermission(user.id, 'task:view');
+
+      // Department wall: the parent task read (/api/tasks/[id]) walls a
+      // cross-dept task behind a 404, so this sub-route must too.
+      const [parentTask] = await db()
+        .select({
+          id: schema.tasks.id,
+          organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
+        })
+        .from(schema.tasks)
+        .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
+        .limit(1);
+
+      const accessError = checkTaskAccessOrRespond(parentTask, orgId, { scope });
+      if (accessError) return accessError;
 
       const comments = await db()
         .select({
@@ -61,7 +76,7 @@ export const GET = withAuth(
 
 // POST /api/tasks/[id]/comments - Create a comment (rate limited: 20 req/min per user)
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:edit');
@@ -81,6 +96,7 @@ export const POST = withAuth(
         .select({
           id: schema.tasks.id,
           organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
           status: schema.tasks.status,
           title: schema.tasks.title,
           taskIdDisplay: schema.tasks.taskIdDisplay,
@@ -90,8 +106,8 @@ export const POST = withAuth(
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
         .limit(1);
 
-      // Shared helper checks task existence + org scope
-      const accessError = checkTaskAccessOrRespond(task, orgId);
+      // Shared helper checks task existence + org scope + department wall
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
       if (accessError) return accessError;
 
       // Block comments on closed/archived (read-only) tasks

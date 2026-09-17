@@ -1,15 +1,15 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
-import { eq, desc, and, isNull } from 'drizzle-orm';
+import { eq, desc, and, isNull, type SQL } from 'drizzle-orm';
 import { getTaskIdFromPath } from '@/lib/api/task-helpers';
 
 export const runtime = 'nodejs';
 
 // GET /api/tasks/[id]/history - List task history entries
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:view');
@@ -34,11 +34,19 @@ export const GET = withAuth(
         .from(schema.taskHistory)
         .innerJoin(schema.tasks, eq(schema.taskHistory.taskId, schema.tasks.id))
         .leftJoin(schema.users, eq(schema.taskHistory.userId, schema.users.id))
+        // The wall rides on the existing tasks join: a walled user gets an empty
+        // history for a cross-department task, same as being refused the task.
         .where(
           and(
-            eq(schema.taskHistory.taskId, taskId),
-            eq(schema.tasks.organizationId, orgId!),
-            isNull(schema.tasks.deletedAt),
+            ...applyDeptScope(
+              [
+                eq(schema.taskHistory.taskId, taskId),
+                eq(schema.tasks.organizationId, orgId!),
+                isNull(schema.tasks.deletedAt),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
           ),
         )
         .orderBy(desc(schema.taskHistory.createdAt))

@@ -1,11 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
-import { eq, asc, desc, and, isNull } from 'drizzle-orm';
+import { eq, asc, desc, and, isNull , type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { READONLY_STATUSES } from '@/lib/api/validation';
+import { checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
 
 export const runtime = 'nodejs';
 
@@ -32,7 +33,7 @@ const ChecklistItemUpdateSchema = z
 
 // GET /api/tasks/[id]/checklist - List checklist items
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:view');
@@ -52,9 +53,15 @@ export const GET = withAuth(
         .innerJoin(schema.tasks, eq(schema.taskChecklistItems.taskId, schema.tasks.id))
         .where(
           and(
-            eq(schema.taskChecklistItems.taskId, taskId),
+            ...applyDeptScope(
+              [
+eq(schema.taskChecklistItems.taskId, taskId),
             eq(schema.tasks.organizationId, orgId!),
             isNull(schema.tasks.deletedAt),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
           ),
         )
         .orderBy(
@@ -73,7 +80,7 @@ export const GET = withAuth(
 
 // POST /api/tasks/[id]/checklist - Create a checklist item
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:edit');
@@ -100,33 +107,25 @@ export const POST = withAuth(
         .select({
           id: schema.tasks.id,
           organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
           status: schema.tasks.status,
         })
         .from(schema.tasks)
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
         .limit(1);
 
-      if (!task) {
-        return NextResponse.json(
-          { error: { code: 'NOT_FOUND', message: 'Task not found' } },
-          { status: 404 },
-        );
-      }
-
-      if (task.organizationId !== orgId) {
-        return NextResponse.json(
-          { error: { code: 'FORBIDDEN', message: 'Access denied' } },
-          { status: 403 },
-        );
-      }
+      // Existence + org scope + department wall, same guard the other task
+      // sub-routes use (a walled user must not mutate another dept's checklist).
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
+      if (accessError) return accessError;
 
       // Block checklist mutations on closed/archived (read-only) tasks.
-      if (READONLY_STATUSES.has(task.status)) {
+      if (READONLY_STATUSES.has(task!.status)) {
         return NextResponse.json(
           {
             error: {
               code: 'INVALID_STATE',
-              message: `Cannot modify checklist on a '${task.status}' task`,
+              message: `Cannot modify checklist on a '${task!.status}' task`,
             },
           },
           { status: 422 },
@@ -183,7 +182,7 @@ export const POST = withAuth(
 
 // PATCH /api/tasks/[id]/checklist - Update a checklist item (toggle, edit, reorder)
 export const PATCH = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       const itemId = request.nextUrl.searchParams.get('itemId');
@@ -219,33 +218,25 @@ export const PATCH = withAuth(
         .select({
           id: schema.tasks.id,
           organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
           status: schema.tasks.status,
         })
         .from(schema.tasks)
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
         .limit(1);
 
-      if (!task) {
-        return NextResponse.json(
-          { error: { code: 'NOT_FOUND', message: 'Task not found' } },
-          { status: 404 },
-        );
-      }
-
-      if (task.organizationId !== orgId) {
-        return NextResponse.json(
-          { error: { code: 'FORBIDDEN', message: 'Access denied' } },
-          { status: 403 },
-        );
-      }
+      // Existence + org scope + department wall, same guard the other task
+      // sub-routes use (a walled user must not mutate another dept's checklist).
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
+      if (accessError) return accessError;
 
       // Block checklist mutations on closed/archived (read-only) tasks.
-      if (READONLY_STATUSES.has(task.status)) {
+      if (READONLY_STATUSES.has(task!.status)) {
         return NextResponse.json(
           {
             error: {
               code: 'INVALID_STATE',
-              message: `Cannot modify checklist on a '${task.status}' task`,
+              message: `Cannot modify checklist on a '${task!.status}' task`,
             },
           },
           { status: 422 },
@@ -321,7 +312,7 @@ export const PATCH = withAuth(
 
 // DELETE /api/tasks/[id]/checklist - Delete a checklist item
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       const itemId = request.nextUrl.searchParams.get('itemId');
@@ -340,33 +331,25 @@ export const DELETE = withAuth(
         .select({
           id: schema.tasks.id,
           organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
           status: schema.tasks.status,
         })
         .from(schema.tasks)
         .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
         .limit(1);
 
-      if (!task) {
-        return NextResponse.json(
-          { error: { code: 'NOT_FOUND', message: 'Task not found' } },
-          { status: 404 },
-        );
-      }
-
-      if (task.organizationId !== orgId) {
-        return NextResponse.json(
-          { error: { code: 'FORBIDDEN', message: 'Access denied' } },
-          { status: 403 },
-        );
-      }
+      // Existence + org scope + department wall, same guard the other task
+      // sub-routes use (a walled user must not mutate another dept's checklist).
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
+      if (accessError) return accessError;
 
       // Block checklist mutations on closed/archived (read-only) tasks.
-      if (READONLY_STATUSES.has(task.status)) {
+      if (READONLY_STATUSES.has(task!.status)) {
         return NextResponse.json(
           {
             error: {
               code: 'INVALID_STATE',
-              message: `Cannot modify checklist on a '${task.status}' task`,
+              message: `Cannot modify checklist on a '${task!.status}' task`,
             },
           },
           { status: 422 },

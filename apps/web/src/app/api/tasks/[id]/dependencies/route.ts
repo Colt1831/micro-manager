@@ -1,11 +1,11 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, applyDeptScope } from '@/lib/api/db';
 import { withAuth, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { isUniqueViolation } from '@/lib/db-errors';
 import { wouldCreateCycle } from '@/lib/api/dependency-cycle';
-import { eq, and, or, isNull, inArray, sql } from 'drizzle-orm';
+import { eq, and, or, isNull, inArray, sql , type SQL } from 'drizzle-orm';
 import { READONLY_STATUSES } from '@/lib/api/validation';
 import { getTaskIdFromPath, checkTaskAccessOrRespond } from '@/lib/api/task-helpers';
 import { z } from 'zod';
@@ -24,7 +24,7 @@ const DependencyCreateSchema = z
 
 // GET /api/tasks/[id]/dependencies - List dependencies
 export const GET = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
 
@@ -49,9 +49,15 @@ export const GET = withAuth(
         .innerJoin(schema.tasks, eq(schema.taskDependencies.dependsOnTaskId, schema.tasks.id))
         .where(
           and(
-            eq(schema.taskDependencies.taskId, taskId),
+            ...applyDeptScope(
+              [
+eq(schema.taskDependencies.taskId, taskId),
             eq(schema.tasks.organizationId, orgId!),
             isNull(schema.tasks.deletedAt),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
           ),
         );
 
@@ -74,9 +80,15 @@ export const GET = withAuth(
         .innerJoin(schema.tasks, eq(schema.taskDependencies.taskId, schema.tasks.id))
         .where(
           and(
-            eq(schema.taskDependencies.dependsOnTaskId, taskId),
+            ...applyDeptScope(
+              [
+eq(schema.taskDependencies.dependsOnTaskId, taskId),
             eq(schema.tasks.organizationId, orgId!),
             isNull(schema.tasks.deletedAt),
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
           ),
         );
 
@@ -91,7 +103,7 @@ export const GET = withAuth(
 
 // POST /api/tasks/[id]/dependencies - Add a dependency
 export const POST = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:edit');
@@ -127,22 +139,27 @@ export const POST = withAuth(
           .select({
             id: schema.tasks.id,
             organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
             status: schema.tasks.status,
           })
           .from(schema.tasks)
           .where(and(eq(schema.tasks.id, taskId), isNull(schema.tasks.deletedAt)))
           .limit(1),
         db()
-          .select({ id: schema.tasks.id, organizationId: schema.tasks.organizationId })
+          .select({
+          id: schema.tasks.id,
+          organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
+        })
           .from(schema.tasks)
           .where(and(eq(schema.tasks.id, dependsOnTaskId), isNull(schema.tasks.deletedAt)))
           .limit(1),
       ]);
 
       // Shared helper checks task existence + org scope for both tasks
-      const sourceError = checkTaskAccessOrRespond(sourceTask[0], orgId);
+      const sourceError = checkTaskAccessOrRespond(sourceTask[0], orgId, { scope });
       if (sourceError) return sourceError;
-      const targetError = checkTaskAccessOrRespond(targetTask[0], orgId);
+      const targetError = checkTaskAccessOrRespond(targetTask[0], orgId, { scope });
       if (targetError) return targetError;
 
       // Block dependency changes on read-only tasks
@@ -192,13 +209,19 @@ export const POST = withAuth(
               .from(schema.taskDependencies)
               .innerJoin(schema.tasks, eq(schema.taskDependencies.dependsOnTaskId, schema.tasks.id))
               .where(
-                and(
-                  inArray(schema.taskDependencies.taskId, taskIds),
+          and(
+            ...applyDeptScope(
+              [
+inArray(schema.taskDependencies.taskId, taskIds),
                   // orgId is guaranteed non-null past checkTaskAccessOrRespond above.
                   eq(schema.tasks.organizationId, orgId!),
                   isNull(schema.tasks.deletedAt),
-                ),
-              );
+              ] as SQL[],
+              scope,
+              schema.tasks.departmentId,
+            ),
+          ),
+        );
             return rows.map((r) => r.dependsOnTaskId);
           };
           if (await wouldCreateCycle(taskId, dependsOnTaskId, fetchDeps)) {
@@ -281,7 +304,7 @@ export const POST = withAuth(
 
 // DELETE /api/tasks/[id]/dependencies - Remove a dependency
 export const DELETE = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const taskId = getTaskIdFromPath(request);
       await requirePermission(user.id, 'task:edit');
@@ -299,6 +322,7 @@ export const DELETE = withAuth(
         .select({
           id: schema.tasks.id,
           organizationId: schema.tasks.organizationId,
+          departmentId: schema.tasks.departmentId,
           status: schema.tasks.status,
         })
         .from(schema.tasks)
@@ -306,7 +330,7 @@ export const DELETE = withAuth(
         .limit(1);
 
       // Shared helper checks task existence + org scope
-      const accessError = checkTaskAccessOrRespond(task, orgId);
+      const accessError = checkTaskAccessOrRespond(task, orgId, { scope });
       if (accessError) return accessError;
 
       if (READONLY_STATUSES.has(task!.status)) {

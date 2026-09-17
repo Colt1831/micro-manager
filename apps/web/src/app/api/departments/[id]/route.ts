@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { db, schema, handleApiError } from '@/lib/api/db';
+import { db, schema, handleApiError, canAccessDept } from '@/lib/api/db';
 import { withAuth, enforceOrgScope, requirePermission } from '@/lib/auth/api-auth';
 import { createAuditEntry } from '@/lib/audit';
 import { eq, desc, and, isNull, sql } from 'drizzle-orm';
@@ -124,7 +124,7 @@ export const GET = withAuth(
 
 // PATCH /api/departments/[id] - Update department (rate limited: 60 req/min per user)
 export const PATCH = withAuth(
-  async (request: NextRequest, { user, orgId }) => {
+  async (request: NextRequest, { user, orgId, scope }) => {
     try {
       const id = getIdFromPath(request);
       await requirePermission(user.id, 'department:edit');
@@ -152,6 +152,15 @@ export const PATCH = withAuth(
       }
 
       enforceOrgScope(existing.organizationId, orgId);
+
+      // Department wall: a walled user must not edit another department. The
+      // row's own id is the scope key here. 404 to match the sibling routes.
+      if (!canAccessDept(scope, existing.id)) {
+        return NextResponse.json(
+          { error: { code: 'NOT_FOUND', message: 'Department not found' } },
+          { status: 404 },
+        );
+      }
 
       // Cross-tenant guard: replacement head user must be same-org.
       if (headUserId != null) {

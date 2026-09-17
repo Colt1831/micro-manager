@@ -30,6 +30,24 @@ export function getTaskIdFromEndpoint(request: Pick<NextRequest, 'nextUrl'>): st
 export interface TaskAccessInfo {
   id: string;
   organizationId: string | null;
+  /** Owning department. Required for the wall; absent on legacy callers. */
+  departmentId?: string | null;
+}
+
+/** The department-scope slice of the auth context (see DeptScope in api-auth). */
+export interface TaskAccessScope {
+  seeAllDepartments: boolean;
+  departmentId: string | null;
+}
+
+export interface TaskAccessOptions {
+  deletedMessage?: string;
+  /**
+   * Caller's department scope. Omit only where no wall applies — every
+   * `/api/tasks/[id]/*` handler must pass it, or the sub-route becomes a way
+   * around the wall enforced on the parent task read.
+   */
+  scope?: TaskAccessScope;
 }
 
 export type TaskAccessError =
@@ -49,7 +67,7 @@ export type TaskAccessResult =
 export function checkTaskAccess(
   task: TaskAccessInfo | undefined,
   orgId: string | null | undefined,
-  options?: { deletedMessage?: string },
+  options?: TaskAccessOptions,
 ): TaskAccessResult {
   if (!task) {
     return {
@@ -73,6 +91,24 @@ export function checkTaskAccess(
     };
   }
 
+  // Department wall. 404 rather than 403 so a cross-department id is
+  // indistinguishable from a missing one — matching /api/tasks/[id] — otherwise
+  // the status alone confirms the task exists.
+  const scope = options?.scope;
+  if (scope && !scope.seeAllDepartments) {
+    const taskDept = task.departmentId ?? null;
+    if (taskDept == null || taskDept !== scope.departmentId) {
+      return {
+        ok: false,
+        error: {
+          code: 'NOT_FOUND',
+          status: 404,
+          message: options?.deletedMessage ?? 'Task not found',
+        },
+      };
+    }
+  }
+
   return { ok: true, task };
 }
 
@@ -93,7 +129,7 @@ export function accessErrorToResponse(error: TaskAccessError): NextResponse {
 export function checkTaskAccessOrRespond(
   task: TaskAccessInfo | undefined,
   orgId: string | null | undefined,
-  options?: { deletedMessage?: string },
+  options?: TaskAccessOptions,
 ): NextResponse | null {
   const result = checkTaskAccess(task, orgId, options);
   if (!result.ok) {
