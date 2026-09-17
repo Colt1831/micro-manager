@@ -380,6 +380,66 @@ async function main() {
     console.log('  ✓ Leave requests seeded');
   }
 
+  // ─── Leave balances ──────────────────────────────────────
+  // Without these rows the approve endpoint's atomic usedDays UPDATE matches
+  // nothing, so approving leave appears to do nothing in the demo. Derive
+  // used/pending from the requests seeded above so the numbers agree with the
+  // Leave pages instead of being decorative.
+  const allLeaveTypes = await db
+    .select({ id: schema.leaveTypes.id, slug: schema.leaveTypes.slug })
+    .from(schema.leaveTypes)
+    .where(eq(schema.leaveTypes.organizationId, orgId));
+
+  if (allLeaveTypes.length > 0) {
+    const year = new Date().getFullYear();
+    const ALLOCATION: Record<string, number> = { vacation: 20, sick: 10, personal: 5 };
+
+    // days already spoken for, per user, on the vacation type (what LEAVES uses)
+    const approvedByUser = new Map<string, number>();
+    const pendingByUser = new Map<string, number>();
+    for (const lv of [
+      { user: 'dev1@demo.local', days: 3, status: 'approved' },
+      { user: 'rep1@demo.local', days: 2, status: 'approved' },
+      { user: 'dev2@demo.local', days: 2, status: 'pending' },
+    ]) {
+      const target = lv.status === 'approved' ? approvedByUser : pendingByUser;
+      target.set(lv.user, (target.get(lv.user) ?? 0) + lv.days);
+    }
+
+    let created = 0;
+    for (const person of PEOPLE) {
+      const userId = userIdByEmail.get(person.email);
+      if (!userId) continue;
+      for (const lt of allLeaveTypes) {
+        const [existing] = await db
+          .select({ id: schema.leaveBalances.id })
+          .from(schema.leaveBalances)
+          .where(
+            and(
+              eq(schema.leaveBalances.userId, userId),
+              eq(schema.leaveBalances.leaveTypeId, lt.id),
+              eq(schema.leaveBalances.year, year),
+            ),
+          )
+          .limit(1);
+        if (existing) continue;
+
+        const isVacation = lt.slug === 'vacation';
+        await db.insert(schema.leaveBalances).values({
+          organizationId: orgId,
+          userId,
+          leaveTypeId: lt.id,
+          year,
+          allocatedDays: ALLOCATION[lt.slug] ?? 10,
+          usedDays: isVacation ? (approvedByUser.get(person.email) ?? 0) : 0,
+          pendingDays: isVacation ? (pendingByUser.get(person.email) ?? 0) : 0,
+        });
+        created++;
+      }
+    }
+    console.log(`  ✓ ${created} leave balances seeded`);
+  }
+
   console.log('✓ demo seed complete');
 }
 
