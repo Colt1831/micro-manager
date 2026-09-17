@@ -259,7 +259,7 @@ export function TaskTemplatesClient({ initialTemplates }: TaskTemplatesClientPro
         <PageHeader
           className="mb-0"
           icon={
-            <div className="from-brand-400 to-brand-600 flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm">
+            <div className="bg-brand-500/15 flex h-8 w-8 items-center justify-center rounded-lg">
               <Layers className="h-4 w-4 text-white" />
             </div>
           }

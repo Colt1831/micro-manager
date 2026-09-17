@@ -197,7 +197,7 @@ export function LeaveRequestDetailClient({ initialRequest }: LeaveDetailClientPr
 
       {/* Status card */}
       <motion.div variants={itemVariants} className="neon-card relative overflow-hidden rounded-2xl p-6">
-        <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-400 to-brand-600" />
+        
 
         {/* Status badge */}
         <div className={cn('mb-4 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium', statusCfg.color)}>

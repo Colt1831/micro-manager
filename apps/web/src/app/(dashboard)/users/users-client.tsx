@@ -334,10 +334,10 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
             <motion.div key={user.id} variants={itemVariants} custom={i}>
               <motion.div
                 whileHover={{ y: -2 }}
-                className="border-surface-300/20 bg-surface-100/80 hover:border-brand-500/30 group relative overflow-hidden rounded-2xl border p-5 transition-all duration-200 hover:shadow-sm"
+                className="border-surface-700/15 bg-surface-200 hover:border-surface-700/30 group relative overflow-hidden rounded-xl border p-4 transition-colors duration-150"
               >
                 <div className="flex items-start gap-3">
-                  <div className="from-brand-400 to-brand-600 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-sm font-medium text-white shadow-sm">
+                  <div className="bg-brand-500/15 text-brand-300 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold">
                     {(user.firstName?.[0] ?? user.name?.[0] ?? '?').toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -350,21 +350,22 @@ export function UsersClient({ initialUsers }: UsersClientProps) {
                           ? `${user.firstName} ${user.lastName}`
                           : (user.name ?? user.email)}
                       </Link>
-                      <Badge
-                        variant={user.isActive ? 'success' : 'default'}
-                        size="sm"
-                        className="shrink-0"
-                      >
-                        {user.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
+                      {/* Only the exception is worth a badge: when every row says
+                          "Active" the badge carries no information and just adds
+                          noise to the scan. Inactive users still stand out. */}
+                      {!user.isActive && (
+                        <Badge variant="default" size="sm" className="shrink-0">
+                          Inactive
+                        </Badge>
+                      )}
                     </div>
-                    <p className="text-surface-500 mt-0.5 truncate text-xs">{user.email}</p>
+                    <p className="text-surface-600 mt-0.5 truncate text-xs">{user.email}</p>
                     {user.designation && (
-                      <p className="text-surface-500 mt-1 text-xs">{user.designation}</p>
+                      <p className="text-surface-600 mt-1 text-xs">{user.designation}</p>
                     )}
                   </div>
                 </div>
-                <div className="mt-3 flex justify-end gap-1">
+                <div className="mt-2 flex justify-end gap-1">
                   <button
                     onClick={() => openEdit(user)}
                     aria-label={`Edit ${user.firstName ?? user.name ?? user.email}`}

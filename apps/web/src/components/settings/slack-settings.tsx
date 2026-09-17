@@ -225,7 +225,7 @@ export function SlackSettings() {
         <div className="space-y-4">
           {/* Integration Card */}
           <div className="border-surface-300/20 bg-surface-100/80 relative overflow-hidden rounded-2xl border transition-all duration-200 hover:shadow-sm">
-            <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-400 to-brand-600" />
+            
             
             <div className="p-4">
               <div className="flex items-start justify-between gap-4">

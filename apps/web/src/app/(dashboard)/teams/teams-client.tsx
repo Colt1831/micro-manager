@@ -369,9 +369,9 @@ export function TeamsClient({ initialData }: TeamsClientProps) {
                       <p className="text-surface-500 line-clamp-2 text-sm">{dept.description}</p>
                     )}
                     <div className="mt-3">
-                      <Badge variant={dept.isActive ? 'success' : 'default'} size="sm">
-                        {dept.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
+                      {!dept.isActive && (
+                        <Badge variant="default" size="sm">Inactive</Badge>
+                      )}
                     </div>
                   </div>
                 </Link>
@@ -434,9 +434,9 @@ export function TeamsClient({ initialData }: TeamsClientProps) {
                       )}
                     </div>
                     <div className="mt-3">
-                      <Badge variant={team.isActive ? 'success' : 'default'} size="sm">
-                        {team.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
+                      {!team.isActive && (
+                        <Badge variant="default" size="sm">Inactive</Badge>
+                      )}
                     </div>
                   </div>
                 </Link>
