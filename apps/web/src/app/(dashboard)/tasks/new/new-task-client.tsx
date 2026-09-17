@@ -189,7 +189,7 @@ export function NewTaskClient({ initialUsers, initialProjects }: NewTaskClientPr
     cn(
       'h-10 w-full rounded-lg border bg-surface-300 text-surface-800 px-3 py-2 text-sm shadow-sm transition-all duration-200',
       focusedField === fieldName
-        ? 'border-brand-500 ring-2 ring-brand-500/20 shadow-glow'
+        ? 'border-brand-500 ring-2 ring-brand-500/20'
         : hasError
           ? 'border-red-300 ring-1 ring-red-500/20'
           : 'border-surface-300 hover:border-surface-400 ',

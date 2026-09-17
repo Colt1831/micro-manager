@@ -132,41 +132,33 @@ const slideVariants = {
 
 const KPI_CARD_STYLES: Record<
   string,
-  { gradient: string; iconBg: string; trend?: { value: string; up: boolean } }
+  { iconBg: string; trend?: { value: string; up: boolean } }
 > = {
   'Total Tasks': {
-    gradient: 'from-blue-500 to-blue-400',
     iconBg: 'bg-blue-500/10 text-blue-400',
     trend: { value: '+12%', up: true },
   },
   'In Progress': {
-    gradient: 'from-amber-500 to-yellow-400',
     iconBg: 'bg-amber-500/10 text-amber-400',
   },
   Completed: {
-    gradient: 'from-green-500 to-emerald-400',
     iconBg: 'bg-green-500/10 text-green-400',
     trend: { value: '+18%', up: true },
   },
   Closed: {
-    gradient: 'from-emerald-500 to-teal-400',
     iconBg: 'bg-emerald-500/10 text-emerald-400',
   },
   Blocked: {
-    gradient: 'from-red-500 to-rose-400',
     iconBg: 'bg-red-500/10 text-red-400',
   },
   Overdue: {
-    gradient: 'from-orange-500 to-amber-400',
     iconBg: 'bg-orange-500/10 text-orange-400',
     trend: { value: '-5%', up: true },
   },
   'Completed This Week': {
-    gradient: 'from-teal-500 to-cyan-400',
     iconBg: 'bg-teal-500/10 text-teal-400',
   },
   'Completion Rate': {
-    gradient: 'from-purple-500 to-violet-400',
     iconBg: 'bg-purple-500/10 text-purple-400',
   },
 } as const;
@@ -424,7 +416,7 @@ export function ReportsClient({ initialMetrics, initialSnapshots }: ReportsClien
         className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
       >
         <div>
-          <h1 className="text-surface-900 text-2xl font-bold tracking-tight">
+          <h1 className="text-surface-950 text-[22px] font-semibold tracking-tight sm:text-2xl">
             Reports
           </h1>
           <p className="text-surface-500 mt-0.5 text-sm">
@@ -523,26 +515,19 @@ export function ReportsClient({ initialMetrics, initialSnapshots }: ReportsClien
               <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
                 {reportCards.map((card) => {
                   const style = KPI_CARD_STYLES[card.label] ?? {
-                    gradient: 'from-brand-500 to-brand-400',
                     iconBg: 'bg-brand-500/10 text-brand-400',
                   };
 
                   return (
                     <motion.div key={card.label} variants={itemVariants}>
-                      <motion.div
-                        whileHover={{ y: -2 }}
-                        className="neon-card group relative overflow-hidden rounded-2xl p-5 transition-all duration-200"
-                      >
-                        <div
-                          className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${style.gradient} opacity-60`}
-                        />
+                      <div className="neon-card group relative overflow-hidden rounded-xl p-4">
                         <div className="flex items-start justify-between">
                           <div className="space-y-1.5">
-                            <p className="text-surface-500 text-xs font-semibold uppercase tracking-wider">
+                            <p className="text-surface-600 text-[11px] font-medium uppercase tracking-wide">
                               {card.label}
                             </p>
                             <div className="flex items-baseline gap-2">
-                              <p className="text-surface-900 text-2xl font-bold tracking-tight">
+                              <p className="text-surface-950 text-[32px] font-semibold leading-none tracking-tight">
                                 {card.value}
                               </p>
                               {style.trend && (
@@ -569,7 +554,7 @@ export function ReportsClient({ initialMetrics, initialSnapshots }: ReportsClien
                             <card.icon className="h-5 w-5" />
                           </div>
                         </div>
-                      </motion.div>
+                      </div>
                     </motion.div>
                   );
                 })}

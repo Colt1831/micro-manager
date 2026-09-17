@@ -990,7 +990,6 @@ export default function TimeTrackingPage() {
         ].map((card) => (
           <motion.div key={card.label} variants={itemVariants}>
             <motion.div
-              whileHover={{ y: -2 }}
               className="border-surface-300/20 bg-surface-100/80 hover:border-brand-500/30 group relative overflow-hidden rounded-2xl border p-4 transition-all duration-200 hover:shadow-sm"
             >
               <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${card.gradient} opacity-60`} />

@@ -1221,7 +1221,7 @@ export function CalendarClient({ initialTasks, initialMilestones, serverNow }: C
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-surface-900 text-2xl font-bold tracking-tight">
+          <h1 className="text-surface-950 text-[22px] font-semibold tracking-tight sm:text-2xl">
             Calendar
           </h1>
           <p className="text-surface-500 mt-0.5 text-sm">

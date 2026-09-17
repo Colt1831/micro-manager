@@ -22,7 +22,6 @@ import {
   Trash2,
 } from 'lucide-react';
 import { containerVariants, itemVariants } from '@/lib/motion/variants';
-import { AccentBar } from '@/components/ui/accent-bar';
 import { FormField } from '@/components/ui/form-field';
 
 export type Project = {
@@ -321,11 +320,9 @@ export function ProjectsClient({ initialProjects }: ProjectsClientProps) {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filtered.map((project, i) => (
             <motion.div key={project.id} variants={itemVariants} custom={i}>
-              <motion.div
-                whileHover={{ y: -3 }}
-                className="neon-card group relative overflow-hidden rounded-2xl p-5"
+              <div
+                className="border-surface-700/15 bg-surface-200 shadow-card hover:border-surface-700/30 hover:bg-surface-300/50 group relative flex h-full flex-col overflow-hidden rounded-xl border p-5 transition-colors duration-150"
               >
-                <AccentBar className="transition-opacity duration-300 group-hover:opacity-100" />
                 {/* Stretched link: the whole card opens the project; the edit/delete
                     buttons sit above it (z-10) so they stay clickable. */}
                 <Link
@@ -365,13 +362,13 @@ export function ProjectsClient({ initialProjects }: ProjectsClientProps) {
                   </div>
                 </div>
                 {project.description && (
-                  <p className="text-surface-500 mb-3 line-clamp-2 text-sm leading-relaxed">
+                  <p className="text-surface-600 mb-3 line-clamp-2 min-h-[2.5rem] text-sm leading-relaxed">
                     {project.description}
                   </p>
                 )}
-                <div className="space-y-1.5">
+                <div className="mt-auto space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-surface-500 font-medium uppercase tracking-wider text-[10px]">
+                    <span className="text-surface-600 text-[11px] font-medium uppercase tracking-wide">
                       Progress
                     </span>
                     <span className="text-brand-400 font-semibold tabular-nums">
@@ -397,7 +394,7 @@ export function ProjectsClient({ initialProjects }: ProjectsClientProps) {
                     )}
                   </div>
                 )}
-              </motion.div>
+              </div>
             </motion.div>
           ))}
         </div>

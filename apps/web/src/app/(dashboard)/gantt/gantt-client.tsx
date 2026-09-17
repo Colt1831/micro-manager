@@ -353,8 +353,8 @@ export function GanttClient({
       {/* Header */}
       <motion.div variants={itemVariants} className="flex shrink-0 items-center justify-between">
         <div>
-          <h1 className="text-surface-900 flex items-center gap-2.5 text-2xl font-bold tracking-tight">
-            <div className="from-brand-400 to-brand-600 flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm">
+          <h1 className="text-surface-950 flex items-center gap-2.5 text-[22px] font-semibold tracking-tight sm:text-2xl">
+            <div className="bg-brand-500/15 flex h-8 w-8 items-center justify-center rounded-lg">
               <CalendarDays className="h-4 w-4 text-white" />
             </div>
             Gantt Chart
@@ -370,7 +370,7 @@ export function GanttClient({
 
       {/* Main Gantt area */}
       <motion.div variants={itemVariants} className="neon-card relative min-h-0 flex-1 overflow-hidden rounded-2xl">
-        <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-400 to-brand-600" />
+        
 
         {loading ? (
           <div className="flex items-center justify-center py-24">

@@ -852,9 +852,9 @@ export function SettingsClient({ initialOrg = null }: { initialOrg?: Organizatio
                               <Badge variant="default" size="sm">{role.userCount}</Badge>
                             </td>
                             <td className="px-3 py-3">
-                              <Badge variant={role.isActive ? 'success' : 'default'} size="sm">
-                                {role.isActive ? 'Active' : 'Inactive'}
-                              </Badge>
+                              {!role.isActive && (
+                        <Badge variant="default" size="sm">Inactive</Badge>
+                      )}
                             </td>
                             <td className="px-3 py-3">
                               <div className="flex items-center gap-1">
